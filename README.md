@@ -2,7 +2,7 @@
 
 **Real-time collaboration platform for teams** — Open source, self-hosted, privacy-first.
 
-Built by [Fractionate](https://fractionate.com)
+Built by [Fractionate](https://fractionate.ai)
 
 ---
 
