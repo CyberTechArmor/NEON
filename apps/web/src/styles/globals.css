@@ -1,0 +1,335 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* NEON Base Styles */
+@layer base {
+  * {
+    @apply border-neon-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-neon-bg text-neon-text font-sans;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-neon-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-neon-border-focus;
+  }
+
+  /* Selection */
+  ::selection {
+    @apply bg-white/20 text-white;
+  }
+
+  /* Focus styles */
+  :focus-visible {
+    @apply outline-none ring-2 ring-white/30 ring-offset-2 ring-offset-neon-bg;
+  }
+
+  /* Remove autofill styles */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  textarea:-webkit-autofill:hover,
+  textarea:-webkit-autofill:focus {
+    -webkit-text-fill-color: #ffffff;
+    -webkit-box-shadow: 0 0 0px 1000px #161616 inset;
+    transition: background-color 5000s ease-in-out 0s;
+  }
+}
+
+@layer components {
+  /* Button variants */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2
+           font-medium rounded transition-colors duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply bg-white text-neon-bg hover:bg-neon-accent-hover;
+  }
+
+  .btn-secondary {
+    @apply bg-neon-surface text-white border border-neon-border
+           hover:bg-neon-surface-hover hover:border-neon-border-focus;
+  }
+
+  .btn-ghost {
+    @apply text-neon-text-secondary hover:text-white hover:bg-neon-surface;
+  }
+
+  .btn-danger {
+    @apply bg-neon-error text-white hover:bg-red-600;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-sm;
+  }
+
+  .btn-lg {
+    @apply px-6 py-3 text-lg;
+  }
+
+  .btn-icon {
+    @apply p-2;
+  }
+
+  /* Input styles */
+  .input {
+    @apply w-full px-3 py-2 bg-neon-surface border border-neon-border rounded
+           text-white placeholder:text-neon-text-muted
+           focus:border-neon-border-focus focus:ring-1 focus:ring-neon-border-focus
+           transition-colors duration-200;
+  }
+
+  .input-error {
+    @apply border-neon-error focus:border-neon-error focus:ring-neon-error;
+  }
+
+  /* Card styles */
+  .card {
+    @apply bg-neon-surface border border-neon-border rounded-lg;
+  }
+
+  .card-hover {
+    @apply hover:border-neon-border-focus hover:shadow-neon transition-all duration-200;
+  }
+
+  /* Badge styles */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 text-xs font-medium rounded;
+  }
+
+  .badge-success {
+    @apply bg-neon-success/20 text-neon-success;
+  }
+
+  .badge-warning {
+    @apply bg-neon-warning/20 text-neon-warning;
+  }
+
+  .badge-error {
+    @apply bg-neon-error/20 text-neon-error;
+  }
+
+  .badge-info {
+    @apply bg-neon-info/20 text-neon-info;
+  }
+
+  /* Avatar styles */
+  .avatar {
+    @apply relative inline-flex items-center justify-center rounded-full
+           bg-neon-surface-hover text-white font-medium overflow-hidden;
+  }
+
+  .avatar-xs {
+    @apply w-6 h-6 text-xs;
+  }
+
+  .avatar-sm {
+    @apply w-8 h-8 text-sm;
+  }
+
+  .avatar-md {
+    @apply w-10 h-10 text-base;
+  }
+
+  .avatar-lg {
+    @apply w-12 h-12 text-lg;
+  }
+
+  .avatar-xl {
+    @apply w-16 h-16 text-xl;
+  }
+
+  /* Status indicator */
+  .status-dot {
+    @apply w-2.5 h-2.5 rounded-full border-2 border-neon-bg;
+  }
+
+  .status-online {
+    @apply bg-neon-success;
+  }
+
+  .status-away {
+    @apply bg-neon-warning;
+  }
+
+  .status-busy {
+    @apply bg-neon-error;
+  }
+
+  .status-offline {
+    @apply bg-neon-text-muted;
+  }
+
+  /* Typing indicator */
+  .typing-indicator {
+    @apply inline-flex items-center gap-1;
+  }
+
+  .typing-indicator span {
+    @apply w-1.5 h-1.5 bg-neon-text-secondary rounded-full animate-typing-dot;
+  }
+
+  .typing-indicator span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .typing-indicator span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  /* Dropdown menu */
+  .dropdown-menu {
+    @apply bg-neon-surface border border-neon-border rounded-lg shadow-neon-lg
+           py-1 min-w-[180px] animate-scale-in;
+  }
+
+  .dropdown-item {
+    @apply flex items-center gap-3 px-3 py-2 text-sm text-neon-text-secondary
+           hover:text-white hover:bg-neon-surface-hover cursor-pointer
+           transition-colors duration-150;
+  }
+
+  .dropdown-item-danger {
+    @apply text-neon-error hover:text-neon-error hover:bg-neon-error/10;
+  }
+
+  .dropdown-separator {
+    @apply my-1 border-t border-neon-border;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50
+           flex items-center justify-center p-4;
+  }
+
+  .modal-content {
+    @apply bg-neon-surface border border-neon-border rounded-xl shadow-neon-lg
+           w-full max-w-md max-h-[90vh] overflow-auto animate-scale-in;
+  }
+
+  /* Toast notifications */
+  .toast {
+    @apply flex items-center gap-3 px-4 py-3 bg-neon-surface border border-neon-border
+           rounded-lg shadow-neon-lg animate-slide-up;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    @apply flex flex-col h-full bg-neon-surface border-r border-neon-border;
+  }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 px-3 py-2 mx-2 rounded text-neon-text-secondary
+           hover:text-white hover:bg-neon-surface-hover cursor-pointer
+           transition-colors duration-150;
+  }
+
+  .sidebar-item-active {
+    @apply text-white bg-neon-surface-hover;
+  }
+
+  /* Message bubble */
+  .message-bubble {
+    @apply max-w-[70%] px-3 py-2 rounded-lg;
+  }
+
+  .message-bubble-own {
+    @apply bg-white text-neon-bg ml-auto;
+  }
+
+  .message-bubble-other {
+    @apply bg-neon-surface-hover text-white;
+  }
+
+  /* Call controls */
+  .call-control {
+    @apply flex items-center justify-center w-12 h-12 rounded-full
+           transition-all duration-200;
+  }
+
+  .call-control-default {
+    @apply bg-neon-surface-hover text-white hover:bg-neon-border;
+  }
+
+  .call-control-active {
+    @apply bg-white text-neon-bg;
+  }
+
+  .call-control-danger {
+    @apply bg-neon-error text-white hover:bg-red-600;
+  }
+}
+
+@layer utilities {
+  /* Text utilities */
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Truncate multiline */
+  .line-clamp-1 {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Hide scrollbar */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Glass effect */
+  .glass {
+    @apply bg-neon-surface/80 backdrop-blur-md;
+  }
+
+  /* Gradient text */
+  .text-gradient {
+    @apply bg-gradient-to-r from-white to-neon-text-secondary bg-clip-text text-transparent;
+  }
+}

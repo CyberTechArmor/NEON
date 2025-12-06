@@ -1,0 +1,41 @@
+{
+  "name": "NEON",
+  "short_name": "NEON",
+  "description": "Secure Enterprise Communication Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0d0d",
+  "theme_color": "#0d0d0d",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/neon-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/neon-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity", "communication"],
+  "shortcuts": [
+    {
+      "name": "New Message",
+      "short_name": "Message",
+      "url": "/chat",
+      "icons": [{ "src": "/neon-icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Join Meeting",
+      "short_name": "Meeting",
+      "url": "/meetings",
+      "icons": [{ "src": "/neon-icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
