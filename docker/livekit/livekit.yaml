@@ -1,0 +1,48 @@
+# =============================================================================
+# LiveKit Server Configuration
+# =============================================================================
+# Documentation: https://docs.livekit.io/realtime/self-hosting/deployment/
+# =============================================================================
+
+port: 7880
+rtc:
+  port_range_start: 7882
+  port_range_end: 7892
+  tcp_port: 7881
+  use_external_ip: false
+  enable_loopback_candidate: true
+
+# Development keys - CHANGE IN PRODUCTION
+keys:
+  devkey: secret_dev_key_change_in_production_abcdef123456
+
+# Logging
+logging:
+  level: info
+  pion_level: warn
+  json: false
+
+# Room settings
+room:
+  enabled_codecs:
+    - mime: audio/opus
+    - mime: video/VP8
+    - mime: video/H264
+  max_participants: 100
+  empty_timeout: 300
+  departure_timeout: 20
+
+# TURN server (for NAT traversal)
+turn:
+  enabled: true
+  udp_port: 3478
+  tls_port: 5349
+
+# Webhook configuration
+webhook:
+  # URLs will be configured via API
+  api_key: devkey
+
+# Recording/Egress
+egress:
+  enabled: true

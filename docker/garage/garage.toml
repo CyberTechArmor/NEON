@@ -1,0 +1,31 @@
+# =============================================================================
+# Garage S3-Compatible Storage Configuration
+# =============================================================================
+# Documentation: https://garagehq.deuxfleurs.fr/documentation/reference-manual/configuration/
+# =============================================================================
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+replication_mode = "none"
+
+[rpc]
+bind_addr = "[::]:3901"
+secret = "DEVELOPMENT_SECRET_CHANGE_IN_PRODUCTION_1234567890abcdef"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"
+
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.garage.localhost"
+
+[admin]
+api_bind_addr = "[::]:3901"
+admin_token = "ADMIN_TOKEN_CHANGE_IN_PRODUCTION"
+
+# Bucket configurations are created via garage CLI after startup
+# See scripts/setup-garage.sh for bucket creation

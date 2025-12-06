@@ -1,0 +1,224 @@
+version: '3.8'
+
+# =============================================================================
+# NEON Platform - Docker Compose Configuration
+# =============================================================================
+# Development and production deployment stack
+# Usage:
+#   Development: docker compose up -d
+#   Production:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: neon-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: neon
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-neon_dev_password}
+      POSTGRES_DB: neon
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts/postgres:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neon -d neon"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - neon-network
+
+  # ---------------------------------------------------------------------------
+  # Redis (Session Store, Cache, Pub/Sub)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: neon-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - neon-network
+
+  # ---------------------------------------------------------------------------
+  # Garage S3 (S3-Compatible Object Storage)
+  # ---------------------------------------------------------------------------
+  garage:
+    image: dxflrs/garage:v0.9.3
+    container_name: neon-garage
+    restart: unless-stopped
+    environment:
+      - GARAGE_ALLOW_WORLD_READABLE_SECRETS=true
+    volumes:
+      - garage_data:/var/lib/garage/data
+      - garage_meta:/var/lib/garage/meta
+      - ./garage/garage.toml:/etc/garage.toml:ro
+    ports:
+      - "3900:3900"  # S3 API
+      - "3901:3901"  # Admin API
+      - "3902:3902"  # Web
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3901/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - neon-network
+
+  # ---------------------------------------------------------------------------
+  # LiveKit (WebRTC Media Server)
+  # ---------------------------------------------------------------------------
+  livekit:
+    image: livekit/livekit-server:v1.5
+    container_name: neon-livekit
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"   # HTTP/WebSocket
+      - "7881:7881"   # RTC (TCP)
+      - "7882:7882/udp"  # RTC (UDP)
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - neon-network
+
+  # ---------------------------------------------------------------------------
+  # LiveKit Egress (Recording Service)
+  # ---------------------------------------------------------------------------
+  livekit-egress:
+    image: livekit/egress:v1.8
+    container_name: neon-livekit-egress
+    restart: unless-stopped
+    environment:
+      EGRESS_CONFIG_FILE: /etc/egress.yaml
+    volumes:
+      - ./livekit/egress.yaml:/etc/egress.yaml:ro
+      - egress_tmp:/tmp
+    depends_on:
+      - livekit
+      - redis
+    networks:
+      - neon-network
+    cap_add:
+      - SYS_ADMIN
+
+  # ---------------------------------------------------------------------------
+  # Mailpit (Development Email Server)
+  # ---------------------------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: neon-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    networks:
+      - neon-network
+    profiles:
+      - dev
+
+  # ---------------------------------------------------------------------------
+  # NEON API Server
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: ${BUILD_TARGET:-development}
+    container_name: neon-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://neon:${DB_PASSWORD:-neon_dev_password}@postgres:5432/neon?schema=public
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://garage:3900
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_URL: http://livekit:7880
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+    volumes:
+      - ../apps/api/src:/app/apps/api/src:ro
+      - ../packages:/app/packages:ro
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - neon-network
+    profiles:
+      - app
+
+  # ---------------------------------------------------------------------------
+  # NEON Web Client
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+      target: ${BUILD_TARGET:-development}
+    container_name: neon-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXT_PUBLIC_WS_URL: ws://localhost:3001
+      NEXT_PUBLIC_LIVEKIT_URL: ws://localhost:7880
+    volumes:
+      - ../apps/web/src:/app/apps/web/src:ro
+      - ../packages:/app/packages:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - neon-network
+    profiles:
+      - app
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  garage_data:
+    driver: local
+  garage_meta:
+    driver: local
+  egress_tmp:
+    driver: local
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  neon-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

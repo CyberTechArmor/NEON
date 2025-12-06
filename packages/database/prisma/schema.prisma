@@ -1,0 +1,1239 @@
+// =============================================================================
+// NEON Platform - Prisma Schema
+// =============================================================================
+// Complete database schema for the collaboration platform
+// Designed for HIPAA/GDPR compliance, multi-tenancy, and federation
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["public", "federation"]
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum ComplianceMode {
+  HIPAA
+  GDPR
+
+  @@schema("public")
+}
+
+enum MfaMethod {
+  TOTP
+  EMAIL
+
+  @@schema("public")
+}
+
+enum UserStatus {
+  PENDING       // Awaiting assignment (JIT provisioned)
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+
+  @@schema("public")
+}
+
+enum PresenceStatus {
+  ONLINE
+  AWAY
+  DND           // Do Not Disturb
+  OFFLINE
+
+  @@schema("public")
+}
+
+enum PermissionDirection {
+  HIGHER_TO_LOWER
+  LOWER_TO_HIGHER
+  BIDIRECTIONAL
+
+  @@schema("public")
+}
+
+enum ConversationType {
+  DIRECT        // 1-to-1
+  GROUP
+
+  @@schema("public")
+}
+
+enum MessageType {
+  TEXT
+  FILE
+  SYSTEM        // Join/leave notifications, etc.
+
+  @@schema("public")
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  IN_PROGRESS
+  ENDED
+  CANCELLED
+
+  @@schema("public")
+}
+
+enum MeetingRecurrence {
+  NONE
+  DAILY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+
+  @@schema("public")
+}
+
+enum NotificationType {
+  MESSAGE
+  MENTION
+  CALL
+  MEETING_REMINDER
+  MEETING_INVITE
+  SYSTEM
+
+  @@schema("public")
+}
+
+enum SsoProvider {
+  LDAP
+  OAUTH2
+  OIDC
+  SAML
+
+  @@schema("public")
+}
+
+enum BackupType {
+  FULL
+  DIFFERENTIAL
+  DATABASE_ONLY
+  STORAGE_ONLY
+
+  @@schema("public")
+}
+
+enum BackupStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+
+  @@schema("public")
+}
+
+// =============================================================================
+// ORGANIZATION & TENANCY
+// =============================================================================
+
+model Organization {
+  id              String         @id @default(uuid()) @db.Uuid
+  name            String
+  slug            String         @unique
+  complianceMode  ComplianceMode @default(HIPAA)
+  settings        Json           @default("{}")  // Org-specific settings
+  storageLimit    BigInt?        // In bytes, null = unlimited
+  storageUsed     BigInt         @default(0)
+  maxFileSize     BigInt         @default(1073741824) // 1GB default
+
+  // Branding
+  logoUrl         String?
+  primaryColor    String?
+
+  // SMTP Configuration (optional)
+  smtpHost        String?
+  smtpPort        Int?
+  smtpSecure      Boolean        @default(false)
+  smtpUser        String?
+  smtpPass        String?        // Encrypted
+  smtpFromName    String?
+  smtpFromEmail   String?
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  // Relations
+  departments     Department[]
+  users           User[]
+  roles           Role[]
+  tags            Tag[]
+  conversations   Conversation[]
+  meetings        Meeting[]
+  ssoConfigs      SsoConfig[]
+  apiKeys         ApiKey[]
+  backups         Backup[]
+  guestOrgs       GuestOrganization[]
+  federationBridgesAsSource   FederationBridge[] @relation("SourceOrg")
+  federationBridgesAsTarget   FederationBridge[] @relation("TargetOrg")
+
+  @@index([slug])
+  @@schema("public")
+}
+
+// =============================================================================
+// DEPARTMENTS & ROLES (Permission Hierarchy)
+// =============================================================================
+
+model Department {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+  name            String
+  description     String?
+  rank            Int            @default(0)  // Cross-department rank (higher = more authority)
+  settings        Json           @default("{}")
+
+  // MFA enforcement
+  mfaRequired     Boolean        @default(false)
+  mfaMethods      MfaMethod[]
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  // Relations
+  organization    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  roles           Role[]
+  users           User[]
+
+  // Permission rules where this department is source or target
+  permissionsAsSource DepartmentPermission[] @relation("SourceDepartment")
+  permissionsAsTarget DepartmentPermission[] @relation("TargetDepartment")
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@schema("public")
+}
+
+model Role {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+  departmentId    String         @db.Uuid
+  name            String
+  description     String?
+  rank            Int            @default(0)  // Intra-department rank
+  permissions     String[]       @default([])  // System permissions (admin actions)
+  settings        Json           @default("{}")
+
+  // MFA enforcement (overrides department)
+  mfaRequired     Boolean?
+  mfaMethods      MfaMethod[]
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  // Relations
+  organization    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  department      Department     @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  users           User[]
+
+  // Permission rules
+  permissionsAsSource RolePermission[] @relation("SourceRole")
+  permissionsAsTarget RolePermission[] @relation("TargetRole")
+  userRolePermissionsAsSource UserRolePermission[] @relation("SourceRole")
+  userRolePermissionsAsTarget UserRolePermission[] @relation("TargetRole")
+
+  @@unique([departmentId, name])
+  @@index([orgId])
+  @@index([departmentId])
+  @@schema("public")
+}
+
+model Tag {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+  name            String
+  color           String?
+  description     String?
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  // Relations
+  organization    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  users           UserTag[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@schema("public")
+}
+
+// =============================================================================
+// PERMISSION RULES
+// =============================================================================
+
+// Department-to-Department permissions
+model DepartmentPermission {
+  id              String              @id @default(uuid()) @db.Uuid
+  sourceDeptId    String              @db.Uuid
+  targetDeptId    String              @db.Uuid
+  direction       PermissionDirection
+  canChat         Boolean             @default(true)
+  canCall         Boolean             @default(true)
+  canViewPresence Boolean             @default(true)
+  requiresApproval Boolean            @default(false)  // Conversation request required
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  sourceDepartment Department         @relation("SourceDepartment", fields: [sourceDeptId], references: [id], onDelete: Cascade)
+  targetDepartment Department         @relation("TargetDepartment", fields: [targetDeptId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceDeptId, targetDeptId])
+  @@schema("public")
+}
+
+// Role-to-Role permissions (within or across departments)
+model RolePermission {
+  id              String              @id @default(uuid()) @db.Uuid
+  sourceRoleId    String              @db.Uuid
+  targetRoleId    String              @db.Uuid
+  direction       PermissionDirection
+  canChat         Boolean             @default(true)
+  canCall         Boolean             @default(true)
+  canViewPresence Boolean             @default(true)
+  requiresApproval Boolean            @default(false)
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  sourceRole      Role                @relation("SourceRole", fields: [sourceRoleId], references: [id], onDelete: Cascade)
+  targetRole      Role                @relation("TargetRole", fields: [targetRoleId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceRoleId, targetRoleId])
+  @@schema("public")
+}
+
+// User-to-User granular permissions (highest priority)
+model UserPermission {
+  id              String              @id @default(uuid()) @db.Uuid
+  sourceUserId    String              @db.Uuid
+  targetUserId    String              @db.Uuid
+  direction       PermissionDirection
+  canChat         Boolean             @default(true)
+  canCall         Boolean             @default(true)
+  canViewPresence Boolean             @default(true)
+  requiresApproval Boolean            @default(false)
+
+  createdAt       DateTime            @default(now())
+  createdBy       String              @db.Uuid
+  updatedAt       DateTime            @updatedAt
+
+  sourceUser      User                @relation("SourceUser", fields: [sourceUserId], references: [id], onDelete: Cascade)
+  targetUser      User                @relation("TargetUser", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceUserId, targetUserId])
+  @@schema("public")
+}
+
+// User-to-Role granular permissions
+model UserRolePermission {
+  id              String              @id @default(uuid()) @db.Uuid
+  userId          String              @db.Uuid
+  roleId          String              @db.Uuid
+  userIsSource    Boolean             // true = user→role, false = role→user
+  direction       PermissionDirection
+  canChat         Boolean             @default(true)
+  canCall         Boolean             @default(true)
+  canViewPresence Boolean             @default(true)
+  requiresApproval Boolean            @default(false)
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceRole      Role                @relation("SourceRole", fields: [roleId], references: [id], onDelete: Cascade)
+  targetRole      Role                @relation("TargetRole", fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, userIsSource])
+  @@schema("public")
+}
+
+// =============================================================================
+// USERS & AUTHENTICATION
+// =============================================================================
+
+model User {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+  departmentId    String?        @db.Uuid
+  roleId          String?        @db.Uuid
+
+  // Identity
+  email           String
+  username        String?
+  displayName     String
+  avatarUrl       String?
+
+  // Auth (null if SSO-only)
+  passwordHash    String?
+
+  // MFA
+  mfaEnabled      Boolean        @default(false)
+  mfaSecret       String?        // TOTP secret, encrypted
+  mfaBackupCodes  String[]       @default([])  // Encrypted
+
+  // Status
+  status          UserStatus     @default(PENDING)
+  presenceStatus  PresenceStatus @default(OFFLINE)
+  presenceMessage String?
+  lastActiveAt    DateTime?
+
+  // Settings
+  settings        Json           @default("{}")  // User preferences
+  timezone        String         @default("UTC")
+  locale          String         @default("en")
+
+  // Notification preferences
+  emailNotifications Boolean     @default(false)
+  pushNotifications Boolean      @default(true)
+
+  // Storage
+  storageLimit    BigInt?        // Override org limit
+  storageUsed     BigInt         @default(0)
+
+  // SSO link
+  ssoProviderId   String?        @db.Uuid
+  ssoExternalId   String?
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  lastLoginAt     DateTime?
+  deactivatedAt   DateTime?
+  deactivatedBy   String?        @db.Uuid
+
+  // Relations
+  organization    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  department      Department?    @relation(fields: [departmentId], references: [id])
+  role            Role?          @relation(fields: [roleId], references: [id])
+  ssoProvider     SsoConfig?     @relation(fields: [ssoProviderId], references: [id])
+
+  tags            UserTag[]
+  sessions        Session[]
+  devices         Device[]
+
+  // Chat relations
+  conversationParticipants ConversationParticipant[]
+  sentMessages    Message[]      @relation("SentMessages")
+  messageReads    MessageRead[]
+  reactions       MessageReaction[]
+
+  // Meeting relations
+  meetingParticipants MeetingParticipant[]
+  meetingsCreated Meeting[]      @relation("MeetingCreator")
+
+  // Call relations
+  callParticipants CallParticipant[]
+  callsInitiated  Call[]         @relation("CallInitiator")
+
+  // Notification relations
+  notifications   Notification[]
+  pushSubscriptions PushSubscription[]
+
+  // Permission relations
+  permissionsAsSource UserPermission[] @relation("SourceUser")
+  permissionsAsTarget UserPermission[] @relation("TargetUser")
+  userRolePermissions UserRolePermission[]
+
+  // File relations
+  uploadedFiles   File[]
+
+  // Conversation requests (when approval is required)
+  sentRequests    ConversationRequest[] @relation("Requester")
+  receivedRequests ConversationRequest[] @relation("Recipient")
+
+  @@unique([orgId, email])
+  @@unique([orgId, username])
+  @@unique([ssoProviderId, ssoExternalId])
+  @@index([orgId])
+  @@index([departmentId])
+  @@index([roleId])
+  @@index([status])
+  @@schema("public")
+}
+
+model UserTag {
+  userId          String         @db.Uuid
+  tagId           String         @db.Uuid
+  assignedAt      DateTime       @default(now())
+  assignedBy      String         @db.Uuid
+
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tag             Tag            @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([userId, tagId])
+  @@schema("public")
+}
+
+model Session {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @db.Uuid
+  token           String         @unique
+  refreshToken    String         @unique
+
+  // Device info
+  deviceId        String?        @db.Uuid
+  userAgent       String?
+  ipAddress       String?
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+  expiresAt       DateTime
+  lastActivityAt  DateTime       @default(now())
+  revokedAt       DateTime?
+
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device          Device?        @relation(fields: [deviceId], references: [id])
+
+  @@index([userId])
+  @@index([token])
+  @@index([refreshToken])
+  @@schema("public")
+}
+
+model Device {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @db.Uuid
+
+  // Device identification
+  fingerprint     String
+  name            String?
+  type            String?        // mobile, desktop, tablet
+  platform        String?        // iOS, Android, Windows, macOS, Linux, Web
+  browser         String?
+
+  // Trust status
+  trusted         Boolean        @default(false)
+  trustedAt       DateTime?
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+  lastSeenAt      DateTime       @default(now())
+
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions        Session[]
+
+  @@unique([userId, fingerprint])
+  @@index([userId])
+  @@schema("public")
+}
+
+// =============================================================================
+// SSO CONFIGURATION
+// =============================================================================
+
+model SsoConfig {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+  provider        SsoProvider
+  name            String
+  enabled         Boolean        @default(true)
+
+  // Provider-specific config (encrypted)
+  config          Json
+
+  // Attribute mapping
+  attributeMapping Json          @default("{}")
+
+  // JIT provisioning
+  jitEnabled      Boolean        @default(true)
+  defaultDepartmentId String?    @db.Uuid
+  defaultRoleId   String?        @db.Uuid
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  organization    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  users           User[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@schema("public")
+}
+
+// =============================================================================
+// CONVERSATIONS & MESSAGES
+// =============================================================================
+
+model Conversation {
+  id              String            @id @default(uuid()) @db.Uuid
+  orgId           String            @db.Uuid
+  type            ConversationType
+
+  // Group-specific
+  name            String?
+  description     String?
+  avatarUrl       String?
+  createdBy       String?           @db.Uuid
+
+  // Settings
+  settings        Json              @default("{}")
+
+  // Last activity for sorting
+  lastMessageAt   DateTime?
+  lastMessagePreview String?
+
+  // Lifecycle
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Soft delete
+  deletedAt       DateTime?
+  deletedBy       String?           @db.Uuid
+
+  // Relations
+  organization    Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  participants    ConversationParticipant[]
+  messages        Message[]
+
+  // Associated meeting (for meeting chats)
+  meeting         Meeting?          @relation("MeetingConversation")
+
+  @@index([orgId])
+  @@index([type])
+  @@index([lastMessageAt])
+  @@schema("public")
+}
+
+model ConversationParticipant {
+  id              String         @id @default(uuid()) @db.Uuid
+  conversationId  String         @db.Uuid
+  userId          String         @db.Uuid
+
+  // Role in conversation (for groups)
+  isOwner         Boolean        @default(false)
+  isAdmin         Boolean        @default(false)
+
+  // Permissions
+  canSendMessages Boolean        @default(true)
+  isMuted         Boolean        @default(false)
+  mutedUntil      DateTime?
+
+  // Freeze (for hierarchy enforcement)
+  isFrozen        Boolean        @default(false)
+  frozenBy        String?        @db.Uuid
+  frozenAt        DateTime?
+
+  // Read tracking
+  lastReadAt      DateTime?
+  lastReadMessageId String?      @db.Uuid
+
+  // Notifications
+  notificationsMuted Boolean     @default(false)
+
+  // Lifecycle
+  joinedAt        DateTime       @default(now())
+  leftAt          DateTime?
+  removedAt       DateTime?
+  removedBy       String?        @db.Uuid
+
+  conversation    Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@schema("public")
+}
+
+// Conversation request (when approval is required)
+model ConversationRequest {
+  id              String         @id @default(uuid()) @db.Uuid
+  requesterId     String         @db.Uuid
+  recipientId     String         @db.Uuid
+  message         String?
+
+  // Status
+  approved        Boolean?       // null = pending
+  respondedAt     DateTime?
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+  expiresAt       DateTime?
+
+  requester       User           @relation("Requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  recipient       User           @relation("Recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId, approved])
+  @@schema("public")
+}
+
+model Message {
+  id              String         @id @default(uuid()) @db.Uuid
+  conversationId  String         @db.Uuid
+  senderId        String         @db.Uuid
+  type            MessageType    @default(TEXT)
+
+  // Content
+  content         String?        // Text content or system message
+  metadata        Json?          // Additional data (file info, etc.)
+
+  // Reply threading
+  replyToId       String?        @db.Uuid
+
+  // Edit tracking
+  editedAt        DateTime?
+  originalContent String?        // For audit
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+
+  // Soft delete (content removed, record kept for compliance)
+  deletedAt       DateTime?
+  deletedBy       String?        @db.Uuid
+
+  // Relations
+  conversation    Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender          User           @relation("SentMessages", fields: [senderId], references: [id])
+  replyTo         Message?       @relation("Replies", fields: [replyToId], references: [id])
+  replies         Message[]      @relation("Replies")
+
+  reads           MessageRead[]
+  reactions       MessageReaction[]
+  files           MessageFile[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@schema("public")
+}
+
+model MessageRead {
+  messageId       String         @db.Uuid
+  userId          String         @db.Uuid
+  readAt          DateTime       @default(now())
+
+  message         Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@schema("public")
+}
+
+model MessageReaction {
+  id              String         @id @default(uuid()) @db.Uuid
+  messageId       String         @db.Uuid
+  userId          String         @db.Uuid
+  emoji           String         // Unicode emoji or custom emoji code
+
+  createdAt       DateTime       @default(now())
+
+  message         Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+  @@schema("public")
+}
+
+model MessageFile {
+  messageId       String         @db.Uuid
+  fileId          String         @db.Uuid
+  order           Int            @default(0)
+
+  message         Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  file            File           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, fileId])
+  @@schema("public")
+}
+
+// =============================================================================
+// FILES & MEDIA
+// =============================================================================
+
+model File {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+  uploadedBy      String         @db.Uuid
+
+  // File info
+  name            String
+  mimeType        String
+  size            BigInt
+
+  // Storage
+  bucket          String
+  key             String         // S3 object key
+
+  // Processing status
+  thumbnailKey    String?        // For images/videos
+  metadata        Json?          // Dimensions, duration, etc.
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+
+  // Soft delete
+  deletedAt       DateTime?
+  deletedBy       String?        @db.Uuid
+
+  uploader        User           @relation(fields: [uploadedBy], references: [id])
+  messages        MessageFile[]
+  meetingRecordings Recording[]
+
+  @@index([orgId])
+  @@index([uploadedBy])
+  @@schema("public")
+}
+
+// =============================================================================
+// MEETINGS & CALLS
+// =============================================================================
+
+model Meeting {
+  id              String            @id @default(uuid()) @db.Uuid
+  orgId           String            @db.Uuid
+  createdById     String            @db.Uuid
+
+  // Meeting info
+  title           String
+  description     String?
+
+  // Scheduling
+  scheduledStart  DateTime
+  scheduledEnd    DateTime
+  timezone        String            @default("UTC")
+  recurrence      MeetingRecurrence @default(NONE)
+  recurrenceRule  String?           // iCal RRULE format
+
+  // Status
+  status          MeetingStatus     @default(SCHEDULED)
+  actualStart     DateTime?
+  actualEnd       DateTime?
+
+  // Settings
+  settings        Json              @default("{}")
+  waitingRoomEnabled Boolean        @default(false)
+  joinBeforeHost  Boolean           @default(false)
+
+  // LiveKit room
+  livekitRoom     String?           @unique
+
+  // Associated chat
+  conversationId  String?           @unique @db.Uuid
+
+  // Lifecycle
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  cancelledAt     DateTime?
+  cancelledBy     String?           @db.Uuid
+
+  // Relations
+  organization    Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator         User              @relation("MeetingCreator", fields: [createdById], references: [id])
+  conversation    Conversation?     @relation("MeetingConversation", fields: [conversationId], references: [id])
+
+  participants    MeetingParticipant[]
+  recordings      Recording[]
+  reminders       MeetingReminder[]
+
+  @@index([orgId])
+  @@index([scheduledStart])
+  @@index([status])
+  @@schema("public")
+}
+
+model MeetingParticipant {
+  id              String         @id @default(uuid()) @db.Uuid
+  meetingId       String         @db.Uuid
+  userId          String         @db.Uuid
+
+  // Invitation status
+  invited         Boolean        @default(true)
+  invitedAt       DateTime       @default(now())
+  responseStatus  String?        // accepted, declined, tentative
+  respondedAt     DateTime?
+
+  // Attendance
+  joinedAt        DateTime?
+  leftAt          DateTime?
+
+  // Permissions
+  isHost          Boolean        @default(false)
+  canPresent      Boolean        @default(true)
+  canUnmute       Boolean        @default(true)
+
+  meeting         Meeting        @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, userId])
+  @@index([userId])
+  @@schema("public")
+}
+
+model MeetingReminder {
+  id              String         @id @default(uuid()) @db.Uuid
+  meetingId       String         @db.Uuid
+
+  // Timing
+  minutesBefore   Int
+
+  // Delivery
+  sentAt          DateTime?
+
+  // Override DND?
+  overrideDnd     Boolean        @default(false)
+
+  meeting         Meeting        @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, minutesBefore])
+  @@schema("public")
+}
+
+model Recording {
+  id              String         @id @default(uuid()) @db.Uuid
+  meetingId       String         @db.Uuid
+  fileId          String         @db.Uuid
+
+  // Recording info
+  startedAt       DateTime
+  endedAt         DateTime?
+  duration        Int?           // Seconds
+
+  // Transcription
+  transcriptionStatus String?    // pending, processing, completed, failed
+  transcriptionUrl String?
+
+  // Sharing
+  shareLink       String?        @unique
+  shareLinkPublic Boolean        @default(false)
+  shareLinkExpires DateTime?
+
+  createdAt       DateTime       @default(now())
+
+  meeting         Meeting        @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  file            File           @relation(fields: [fileId], references: [id])
+
+  @@index([meetingId])
+  @@schema("public")
+}
+
+// =============================================================================
+// INSTANT CALLS (Non-scheduled)
+// =============================================================================
+
+model Call {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+  initiatorId     String         @db.Uuid
+
+  // Call type
+  isGroupCall     Boolean        @default(false)
+  conversationId  String?        @db.Uuid  // Associated conversation
+
+  // LiveKit
+  livekitRoom     String         @unique
+
+  // Status
+  startedAt       DateTime       @default(now())
+  answeredAt      DateTime?
+  endedAt         DateTime?
+  endReason       String?        // completed, missed, declined, failed
+
+  // Relations
+  initiator       User           @relation("CallInitiator", fields: [initiatorId], references: [id])
+  participants    CallParticipant[]
+
+  @@index([orgId])
+  @@index([startedAt])
+  @@schema("public")
+}
+
+model CallParticipant {
+  id              String         @id @default(uuid()) @db.Uuid
+  callId          String         @db.Uuid
+  userId          String         @db.Uuid
+
+  // Timing
+  invitedAt       DateTime       @default(now())
+  joinedAt        DateTime?
+  leftAt          DateTime?
+
+  // Status
+  status          String         @default("invited") // invited, joining, connected, left
+
+  call            Call           @relation(fields: [callId], references: [id], onDelete: Cascade)
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([callId, userId])
+  @@schema("public")
+}
+
+// =============================================================================
+// NOTIFICATIONS
+// =============================================================================
+
+model Notification {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @db.Uuid
+  type            NotificationType
+
+  // Content
+  title           String
+  body            String?
+  data            Json?            // Additional data for routing
+
+  // Reference
+  resourceType    String?
+  resourceId      String?          @db.Uuid
+
+  // Status
+  read            Boolean          @default(false)
+  readAt          DateTime?
+
+  // Delivery
+  emailSent       Boolean          @default(false)
+  pushSent        Boolean          @default(false)
+
+  createdAt       DateTime         @default(now())
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([createdAt])
+  @@schema("public")
+}
+
+model PushSubscription {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @db.Uuid
+
+  // Web Push
+  endpoint        String
+  p256dh          String
+  auth            String
+
+  // Device info
+  userAgent       String?
+
+  createdAt       DateTime       @default(now())
+
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, endpoint])
+  @@index([userId])
+  @@schema("public")
+}
+
+// =============================================================================
+// API KEYS
+// =============================================================================
+
+model ApiKey {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+
+  name            String
+  keyHash         String         @unique  // Only store hash
+  keyPrefix       String         // First 8 chars for identification
+
+  // Permissions
+  scopes          String[]       @default([])
+
+  // Rate limiting
+  rateLimit       Int?           // Requests per minute
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+  createdBy       String         @db.Uuid
+  lastUsedAt      DateTime?
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  revokedBy       String?        @db.Uuid
+
+  organization    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@schema("public")
+}
+
+// =============================================================================
+// GUEST ORGANIZATIONS
+// =============================================================================
+
+model GuestOrganization {
+  id              String         @id @default(uuid()) @db.Uuid
+  hostOrgId       String         @db.Uuid
+  name            String
+  description     String?
+
+  // Access mapping
+  mappedDepartmentId String?     @db.Uuid
+  mappedRoleId    String?        @db.Uuid
+
+  // Feature access
+  features        String[]       @default([])
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+  createdBy       String         @db.Uuid
+  expiresAt       DateTime?
+
+  hostOrganization Organization  @relation(fields: [hostOrgId], references: [id], onDelete: Cascade)
+  members         GuestMember[]
+
+  @@index([hostOrgId])
+  @@schema("public")
+}
+
+model GuestMember {
+  id              String           @id @default(uuid()) @db.Uuid
+  guestOrgId      String           @db.Uuid
+
+  // Identity
+  email           String
+  displayName     String
+
+  // Auth (simplified)
+  passwordHash    String?
+  inviteToken     String?          @unique
+  inviteExpires   DateTime?
+
+  // Status
+  status          UserStatus       @default(PENDING)
+  lastActiveAt    DateTime?
+
+  createdAt       DateTime         @default(now())
+
+  guestOrg        GuestOrganization @relation(fields: [guestOrgId], references: [id], onDelete: Cascade)
+
+  @@unique([guestOrgId, email])
+  @@schema("public")
+}
+
+// =============================================================================
+// FEDERATION
+// =============================================================================
+
+model FederationBridge {
+  id              String         @id @default(uuid()) @db.Uuid
+  sourceOrgId     String         @db.Uuid
+  targetOrgId     String?        @db.Uuid  // Null if external
+
+  // External instance info
+  targetInstanceUrl String?
+  targetInstanceId String?
+
+  // Status
+  status          String         @default("pending") // pending, active, suspended, severed
+
+  // Keys for secure communication
+  localPublicKey  String
+  remotePublicKey String?
+
+  // Access configuration
+  accessConfig    Json           @default("{}")
+
+  // Lifecycle
+  initiatedAt     DateTime       @default(now())
+  initiatedBy     String         @db.Uuid
+  acceptedAt      DateTime?
+  acceptedBy      String?        @db.Uuid
+  severedAt       DateTime?
+  severedBy       String?        @db.Uuid
+  severedReason   String?
+
+  sourceOrg       Organization   @relation("SourceOrg", fields: [sourceOrgId], references: [id], onDelete: Cascade)
+  targetOrg       Organization?  @relation("TargetOrg", fields: [targetOrgId], references: [id])
+
+  @@index([sourceOrgId])
+  @@index([targetOrgId])
+  @@schema("federation")
+}
+
+// =============================================================================
+// BACKUP & RESTORE
+// =============================================================================
+
+model Backup {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+
+  type            BackupType
+  status          BackupStatus   @default(PENDING)
+
+  // Storage
+  bucket          String?
+  key             String?
+  size            BigInt?
+
+  // Scope
+  scope           Json?          // What's included
+
+  // Progress
+  progress        Int            @default(0)  // 0-100
+  errorMessage    String?
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+  createdBy       String         @db.Uuid
+  completedAt     DateTime?
+
+  // Retention
+  retainUntil     DateTime?
+
+  organization    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([status])
+  @@schema("public")
+}
+
+// =============================================================================
+// COMPLIANCE TRACKING
+// =============================================================================
+
+model DataRetentionPolicy {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+
+  resourceType    String         // messages, files, recordings, etc.
+  retentionDays   Int?           // Null = indefinite
+
+  // GDPR-specific
+  purgeEnabled    Boolean        @default(false)
+  purgeGraceDays  Int            @default(30)
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@unique([orgId, resourceType])
+  @@schema("public")
+}
+
+// Track purge requests for GDPR compliance
+model PurgeRequest {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+
+  // Requester (user requesting deletion)
+  requesterId     String         @db.Uuid
+
+  // What to purge
+  scope           Json           // Specific data to purge
+
+  // Status
+  status          String         @default("pending") // pending, approved, processing, completed, rejected
+
+  // Processing
+  processedAt     DateTime?
+  processedBy     String?        @db.Uuid
+
+  // Audit
+  rejectionReason String?
+
+  createdAt       DateTime       @default(now())
+
+  @@index([orgId, status])
+  @@schema("public")
+}

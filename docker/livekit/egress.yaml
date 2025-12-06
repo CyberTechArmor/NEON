@@ -1,0 +1,47 @@
+# =============================================================================
+# LiveKit Egress (Recording) Configuration
+# =============================================================================
+# Documentation: https://docs.livekit.io/egress/overview/
+# =============================================================================
+
+# LiveKit connection
+api_key: devkey
+api_secret: secret_dev_key_change_in_production_abcdef123456
+ws_url: ws://livekit:7880
+
+# Health check
+health_port: 7890
+
+# Logging
+log_level: info
+
+# Redis for job queue
+redis:
+  address: redis:6379
+
+# S3 output configuration (Garage)
+s3:
+  access_key: GK_DEV_ACCESS_KEY
+  secret: GK_DEV_SECRET_KEY
+  region: garage
+  endpoint: http://garage:3900
+  bucket: neon-recordings
+  force_path_style: true
+
+# Temporary file storage
+file_output:
+  local: true
+  output_directory: /tmp/egress
+
+# CPU limits
+cpu_cost:
+  room_composite_cpu_cost: 3
+  audio_room_composite_cpu_cost: 1.5
+  web_cpu_cost: 3
+  track_composite_cpu_cost: 1
+  track_cpu_cost: 0.5
+
+# Enable templates
+templates:
+  enabled: true
+  base_url: http://api:3001/recording-templates
