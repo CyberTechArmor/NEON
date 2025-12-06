@@ -223,7 +223,7 @@ export const adminApi = {
 
   getStats: () => api.get<ApiResponse<unknown>>('/admin/stats'),
 
-  getAuditLog: (params?: { page?: number; limit?: number; action?: string; resourceType?: string }) =>
+  getAuditLog: (params?: { page?: number; limit?: number; action?: string; resourceType?: string; userId?: string; startDate?: string; endDate?: string }) =>
     api.get<ApiResponse<unknown[]>>('/admin/audit', { params }),
 
   exportAuditLog: (startDate: string, endDate: string, format: 'json' | 'csv') =>
@@ -234,4 +234,150 @@ export const adminApi = {
 
   triggerJob: (jobName: string) =>
     api.post<ApiResponse<{ triggered: boolean }>>(`/admin/jobs/${jobName}/trigger`),
+
+  // User management
+  users: {
+    list: (params?: { page?: number; limit?: number; search?: string; roleId?: string; departmentId?: string; status?: string }) =>
+      api.get<ApiResponse<unknown[]>>('/admin/users', { params }),
+
+    get: (id: string) => api.get<ApiResponse<unknown>>(`/admin/users/${id}`),
+
+    create: (data: { email: string; name: string; password: string; roleId: string; departmentId?: string }) =>
+      api.post<ApiResponse<unknown>>('/admin/users', data),
+
+    update: (id: string, data: { name?: string; email?: string; roleId?: string; departmentId?: string; isActive?: boolean }) =>
+      api.patch<ApiResponse<unknown>>(`/admin/users/${id}`, data),
+
+    delete: (id: string) => api.delete(`/admin/users/${id}`),
+
+    resetPassword: (id: string) =>
+      api.post<ApiResponse<{ temporaryPassword: string }>>(`/admin/users/${id}/reset-password`),
+
+    disableMfa: (id: string) => api.post(`/admin/users/${id}/disable-mfa`),
+
+    bulkImport: (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return api.post<ApiResponse<{ imported: number; failed: number; errors: string[] }>>('/admin/users/bulk-import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    },
+
+    exportUsers: (format: 'csv' | 'json') =>
+      api.get('/admin/users/export', { params: { format }, responseType: 'blob' }),
+  },
+
+  // Department management
+  departments: {
+    list: (params?: { page?: number; limit?: number }) =>
+      api.get<ApiResponse<unknown[]>>('/admin/departments', { params }),
+
+    get: (id: string) => api.get<ApiResponse<unknown>>(`/admin/departments/${id}`),
+
+    create: (data: { name: string; description?: string; parentId?: string }) =>
+      api.post<ApiResponse<unknown>>('/admin/departments', data),
+
+    update: (id: string, data: { name?: string; description?: string; parentId?: string }) =>
+      api.patch<ApiResponse<unknown>>(`/admin/departments/${id}`, data),
+
+    delete: (id: string) => api.delete(`/admin/departments/${id}`),
+
+    getPermissions: (id: string) =>
+      api.get<ApiResponse<unknown[]>>(`/admin/departments/${id}/permissions`),
+
+    setPermissions: (id: string, permissions: { permission: string; granted: boolean }[]) =>
+      api.put(`/admin/departments/${id}/permissions`, { permissions }),
+  },
+
+  // Role management
+  roles: {
+    list: (params?: { page?: number; limit?: number }) =>
+      api.get<ApiResponse<unknown[]>>('/admin/roles', { params }),
+
+    get: (id: string) => api.get<ApiResponse<unknown>>(`/admin/roles/${id}`),
+
+    create: (data: { name: string; description?: string; departmentId?: string }) =>
+      api.post<ApiResponse<unknown>>('/admin/roles', data),
+
+    update: (id: string, data: { name?: string; description?: string }) =>
+      api.patch<ApiResponse<unknown>>(`/admin/roles/${id}`, data),
+
+    delete: (id: string) => api.delete(`/admin/roles/${id}`),
+
+    getPermissions: (id: string) =>
+      api.get<ApiResponse<unknown[]>>(`/admin/roles/${id}/permissions`),
+
+    setPermissions: (id: string, permissions: { permission: string; granted: boolean }[]) =>
+      api.put(`/admin/roles/${id}/permissions`, { permissions }),
+  },
+
+  // SSO configuration
+  sso: {
+    getProviders: () => api.get<ApiResponse<unknown[]>>('/admin/sso/providers'),
+
+    getProvider: (id: string) => api.get<ApiResponse<unknown>>(`/admin/sso/providers/${id}`),
+
+    createProvider: (data: {
+      type: 'ldap' | 'oauth2' | 'saml' | 'oidc';
+      name: string;
+      config: Record<string, unknown>;
+      isEnabled: boolean;
+    }) => api.post<ApiResponse<unknown>>('/admin/sso/providers', data),
+
+    updateProvider: (id: string, data: {
+      name?: string;
+      config?: Record<string, unknown>;
+      isEnabled?: boolean;
+    }) => api.patch<ApiResponse<unknown>>(`/admin/sso/providers/${id}`, data),
+
+    deleteProvider: (id: string) => api.delete(`/admin/sso/providers/${id}`),
+
+    testProvider: (id: string) =>
+      api.post<ApiResponse<{ success: boolean; message: string }>>(`/admin/sso/providers/${id}/test`),
+  },
+
+  // Federation bridges
+  federation: {
+    getBridges: () => api.get<ApiResponse<unknown[]>>('/admin/federation/bridges'),
+
+    getBridge: (id: string) => api.get<ApiResponse<unknown>>(`/admin/federation/bridges/${id}`),
+
+    createBridge: (data: {
+      name: string;
+      remoteUrl: string;
+      sharedSecret: string;
+      isEnabled: boolean;
+    }) => api.post<ApiResponse<unknown>>('/admin/federation/bridges', data),
+
+    updateBridge: (id: string, data: {
+      name?: string;
+      remoteUrl?: string;
+      sharedSecret?: string;
+      isEnabled?: boolean;
+    }) => api.patch<ApiResponse<unknown>>(`/admin/federation/bridges/${id}`, data),
+
+    deleteBridge: (id: string) => api.delete(`/admin/federation/bridges/${id}`),
+
+    testBridge: (id: string) =>
+      api.post<ApiResponse<{ success: boolean; latency: number; message: string }>>(`/admin/federation/bridges/${id}/test`),
+
+    syncBridge: (id: string) =>
+      api.post<ApiResponse<{ synced: number }>>(`/admin/federation/bridges/${id}/sync`),
+  },
+
+  // Organization settings
+  organization: {
+    get: () => api.get<ApiResponse<unknown>>('/admin/organization'),
+
+    update: (data: {
+      name?: string;
+      domain?: string;
+      settings?: Record<string, unknown>;
+    }) => api.patch<ApiResponse<unknown>>('/admin/organization', data),
+
+    getSettings: () => api.get<ApiResponse<unknown>>('/admin/organization/settings'),
+
+    updateSettings: (settings: Record<string, unknown>) =>
+      api.patch('/admin/organization/settings', settings),
+  },
 };
