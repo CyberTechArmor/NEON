@@ -56,46 +56,81 @@ neon/
 
 ## Quick Start
 
-### Prerequisites
+### Automated Setup (Recommended)
 
-- Node.js 20+
-- PostgreSQL 15+
-- Redis 7+
-- LiveKit server (for video calls)
-- S3-compatible storage (optional)
-
-### Installation
+The easiest way to deploy NEON is using the interactive setup wizard:
 
 ```bash
 # Clone the repository
 git clone https://github.com/fractionate/neon.git
 cd neon
 
+# Run the setup wizard
+./scripts/setup.sh
+```
+
+The wizard will:
+- Ask for your domain name(s)
+- Auto-generate all secrets (JWT, LiveKit, S3, encryption keys)
+- Configure SSL with Let's Encrypt (optional)
+- Create all environment files
+- Generate reverse proxy configs if needed
+
+### What You Need
+
+- A server with Docker and Docker Compose
+- A domain name pointing to your server
+- (Optional) A separate subdomain for LiveKit video
+
+### Docker Deployment
+
+After running the setup wizard:
+
+```bash
+# Start all services
+cd docker && docker compose up -d
+
+# Initialize the database
+docker compose exec api npm run db:migrate
+docker compose exec api npm run db:seed
+
+# View logs
+docker compose logs -f
+```
+
+### Using Your Own Reverse Proxy
+
+If you have an existing reverse proxy (nginx, Caddy, etc.), the setup wizard can generate configuration files for you:
+
+```bash
+# Generate configs for all proxy types
+./scripts/generate-proxy-config.sh all your-domain.com livekit.your-domain.com true
+
+# Or generate for a specific proxy
+./scripts/generate-proxy-config.sh nginx your-domain.com livekit.your-domain.com true
+```
+
+Supported proxies: `nginx`, `caddy`, `haproxy`, `traefik`, `apache`
+
+### Manual Setup
+
+For development or custom configurations:
+
+```bash
 # Install dependencies
 npm install
 
-# Set up environment variables
+# Copy example env files
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
 
-# Run database migrations
+# Edit the .env files with your configuration
+# Then run database migrations
 npm run db:migrate
-
-# Seed initial data
 npm run db:seed
 
 # Start development servers
 npm run dev
-```
-
-### Docker Deployment
-
-```bash
-# Start all services
-npm run docker:up
-
-# View logs
-npm run docker:logs
 ```
 
 ---
