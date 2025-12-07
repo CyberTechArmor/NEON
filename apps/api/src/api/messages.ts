@@ -294,16 +294,17 @@ router.post('/:id/reactions', async (req: Request, res: Response, next: NextFunc
       throw new NotFoundError('Message', req.params.id);
     }
 
+    const messageId = req.params.id!;
     const reaction = await prisma.messageReaction.upsert({
       where: {
         messageId_userId_emoji: {
-          messageId: req.params.id,
+          messageId,
           userId: req.userId!,
           emoji,
         },
       },
       create: {
-        messageId: req.params.id,
+        messageId,
         userId: req.userId!,
         emoji,
       },
@@ -317,7 +318,7 @@ router.post('/:id/reactions', async (req: Request, res: Response, next: NextFunc
       messageId: message.id,
       conversationId: message.conversationId,
       userId: req.userId,
-      userDisplayName: reaction.user.displayName,
+      userDisplayName: (reaction as { user: { displayName: string } }).user.displayName,
       emoji,
     });
 
@@ -348,9 +349,9 @@ router.delete('/:id/reactions/:emoji', async (req: Request, res: Response, next:
     await prisma.messageReaction.delete({
       where: {
         messageId_userId_emoji: {
-          messageId: req.params.id,
+          messageId: req.params.id!,
           userId: req.userId!,
-          emoji: decodeURIComponent(req.params.emoji),
+          emoji: decodeURIComponent(req.params.emoji!),
         },
       },
     });

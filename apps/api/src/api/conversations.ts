@@ -144,7 +144,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       },
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       data: conversation,
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -259,9 +259,9 @@ router.post('/:id/participants', async (req: Request, res: Response, next: NextF
       if (allowed) {
         await prisma.conversationParticipant.upsert({
           where: {
-            conversationId_userId: { conversationId: req.params.id, viserId: userId },
+            conversationId_userId: { conversationId: req.params.id!, userId },
           },
-          create: { conversationId: req.params.id, userId },
+          create: { conversationId: req.params.id!, userId },
           update: { leftAt: null, removedAt: null },
         });
       }
@@ -302,8 +302,8 @@ router.delete('/:id/participants/:userId', async (req: Request, res: Response, n
     await prisma.conversationParticipant.update({
       where: {
         conversationId_userId: {
-          conversationId: req.params.id,
-          userId: req.params.userId,
+          conversationId: req.params.id!,
+          userId: req.params.userId!,
         },
       },
       data: isLeavingSelf
@@ -336,7 +336,7 @@ router.post('/:id/freeze', async (req: Request, res: Response, next: NextFunctio
 
     await prisma.conversationParticipant.update({
       where: {
-        conversationId_userId: { conversationId: req.params.id, userId },
+        conversationId_userId: { conversationId: req.params.id!, userId },
       },
       data: {
         isFrozen: true,

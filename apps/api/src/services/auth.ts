@@ -80,7 +80,7 @@ export function generateAccessToken(user: {
   };
 
   return jwt.sign(payload, config.auth.jwtSecret, {
-    expiresIn: config.auth.jwtAccessExpiresIn,
+    expiresIn: config.auth.jwtAccessExpiresIn as jwt.SignOptions['expiresIn'],
   });
 }
 
@@ -97,7 +97,7 @@ export function generateRefreshToken(userId: string, deviceId?: string): string 
   };
 
   return jwt.sign(payload, config.auth.jwtSecret, {
-    expiresIn: config.auth.jwtRefreshExpiresIn,
+    expiresIn: config.auth.jwtRefreshExpiresIn as jwt.SignOptions['expiresIn'],
   });
 }
 

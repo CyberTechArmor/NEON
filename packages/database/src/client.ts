@@ -89,5 +89,5 @@ export async function checkDatabaseHealth(): Promise<{
   }
 }
 
-export { PrismaClient };
-export type { Prisma } from '@prisma/client';
+export { PrismaClient, Prisma } from '@prisma/client';
+export type { Prisma as PrismaType } from '@prisma/client';

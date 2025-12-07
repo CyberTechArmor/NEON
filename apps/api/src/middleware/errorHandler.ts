@@ -6,7 +6,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
-import { Prisma } from '@neon/database';
+import { Prisma } from '@prisma/client';
 import { AppError, ErrorCodes, isOperationalError, type ApiResponse, type ApiError } from '@neon/shared';
 import { getConfig } from '@neon/config';
 

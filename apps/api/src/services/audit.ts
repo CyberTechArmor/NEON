@@ -318,7 +318,7 @@ export class AuditService {
         }
 
         // Recalculate hash and verify
-        const calculatedHash = await prisma.$queryRaw<[{ hash: string }]>`
+        const calculatedHash: [{ hash: string }] = await prisma.$queryRaw`
           SELECT audit.calculate_entry_hash(
             ${entry.created_at},
             ${entry.org_id}::uuid,
