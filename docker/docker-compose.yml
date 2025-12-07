@@ -179,13 +179,17 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.web
       target: ${BUILD_TARGET:-development}
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://api:3001}
+        VITE_WS_URL: ${VITE_WS_URL:-ws://api:3001}
+        VITE_LIVEKIT_URL: ${VITE_LIVEKIT_URL:-ws://livekit:7880}
     container_name: neon-web
     restart: unless-stopped
     environment:
       NODE_ENV: ${NODE_ENV:-development}
-      NEXT_PUBLIC_API_URL: http://localhost:3001
-      NEXT_PUBLIC_WS_URL: ws://localhost:3001
-      NEXT_PUBLIC_LIVEKIT_URL: ws://localhost:7880
+      VITE_API_URL: ${VITE_API_URL:-http://api:3001}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://api:3001}
+      VITE_LIVEKIT_URL: ${VITE_LIVEKIT_URL:-ws://livekit:7880}
     volumes:
       - ../apps/web/src:/app/apps/web/src:ro
       - ../packages:/app/packages:ro
