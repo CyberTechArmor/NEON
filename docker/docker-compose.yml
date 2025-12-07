@@ -62,6 +62,7 @@ services:
     image: dxflrs/garage:v0.9.3
     container_name: neon-garage
     restart: unless-stopped
+    command: ["/garage", "server"]
     environment:
       - GARAGE_ALLOW_WORLD_READABLE_SECRETS=true
     volumes:
@@ -72,11 +73,6 @@ services:
       - "3900:3900"  # S3 API
       - "3901:3901"  # Admin API
       - "3902:3902"  # Web
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3901/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     networks:
       - neon-network
 
