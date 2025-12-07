@@ -19,10 +19,15 @@ let publisher: Redis | null = null;
 function getRedisOptions(): RedisOptions {
   const url = new URL(config.redis.url);
 
+  // Password can come from:
+  // 1. REDIS_PASSWORD env var (config.redis.password)
+  // 2. URL format: redis://:password@host:port (url.password)
+  const password = config.redis.password || url.password || undefined;
+
   const options: RedisOptions = {
     host: url.hostname,
     port: parseInt(url.port) || 6379,
-    password: config.redis.password || undefined,
+    password,
     keyPrefix: config.redis.prefix,
     retryStrategy: (times: number) => {
       if (times > 10) {
