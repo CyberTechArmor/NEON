@@ -908,8 +908,6 @@ fi
 if [ "$USE_BUILTIN_PROXY" = "true" ]; then
     print_info "Creating Docker Compose with built-in proxy..."
     cat > "$PROJECT_ROOT/docker/docker-compose.yml" << 'EOF'
-version: '3.8'
-
 services:
   # Caddy Reverse Proxy with Auto SSL
   caddy:
@@ -1150,8 +1148,6 @@ else
     # Generate Docker Compose without proxy
     print_info "Creating Docker Compose without built-in proxy..."
     cat > "$PROJECT_ROOT/docker/docker-compose.yml" << EOF
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
