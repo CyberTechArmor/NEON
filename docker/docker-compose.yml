@@ -159,6 +159,10 @@ services:
       LIVEKIT_API_URL: http://livekit:7880
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
+      # Database seeding (set to true to seed on first startup)
+      SEED_DATABASE: ${SEED_DATABASE:-false}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@neon.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123!}
     volumes:
       - ../apps/api/src:/app/apps/api/src:ro
       - ../packages:/app/packages:ro
