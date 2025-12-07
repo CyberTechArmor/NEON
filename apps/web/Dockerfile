@@ -12,8 +12,8 @@ COPY apps/web/package*.json ./apps/web/
 COPY packages/shared/package*.json ./packages/shared/
 COPY packages/config/package*.json ./packages/config/
 
-# Install dependencies
-RUN npm ci --workspace=@neon/web --include-workspace-root
+# Install dependencies (use npm install since package-lock.json may not exist)
+RUN npm install --workspace=@neon/web --include-workspace-root
 
 # Copy source files
 COPY apps/web ./apps/web
