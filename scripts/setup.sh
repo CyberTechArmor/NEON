@@ -974,8 +974,7 @@ services:
       - "7881:7881"
       - "50000-50100:50000-50100/udp"
     depends_on:
-      redis:
-        condition: service_healthy
+      - redis
     networks:
       - neon
 
@@ -988,10 +987,8 @@ services:
     env_file:
       - ../apps/api/.env
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - postgres
+      - redis
     networks:
       - neon
 
@@ -1054,9 +1051,8 @@ EOF
 
         # Add garage dependency to api
         sed -i '/depends_on:/,/networks:/{
-            /redis:/a\
-      garage:\
-        condition: service_healthy
+            /- redis/a\
+      - garage
         }' "$PROJECT_ROOT/docker/docker-compose.yml"
     fi
 
@@ -1193,8 +1189,7 @@ services:
       - "${BIND_ADDRESS}:7881:7881"
       - "50000-50100:50000-50100/udp"
     depends_on:
-      redis:
-        condition: service_healthy
+      - redis
     networks:
       - neon
 
@@ -1209,10 +1204,8 @@ services:
     env_file:
       - ../apps/api/.env
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - postgres
+      - redis
     networks:
       - neon
 
@@ -1275,9 +1268,8 @@ EOF
 
         # Add garage dependency to api
         sed -i '/depends_on:/,/networks:/{
-            /redis:/a\
-      garage:\
-        condition: service_healthy
+            /- redis/a\
+      - garage
         }' "$PROJECT_ROOT/docker/docker-compose.yml"
     fi
 
