@@ -71,6 +71,9 @@ RUN npm run db:generate
 # Build all packages and api
 RUN turbo run build --filter=@neon/api...
 
+# Ensure seed.js is compiled (may not be created if turbo cache is used)
+RUN cd packages/database && npm run build:seed
+
 # Prune development dependencies
 RUN npm prune --production
 
