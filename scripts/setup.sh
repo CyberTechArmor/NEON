@@ -397,7 +397,7 @@ check_dependencies() {
 }
 
 # Total steps for progress indicator
-TOTAL_STEPS=7
+TOTAL_STEPS=8
 
 #
 # MAIN SCRIPT
@@ -531,9 +531,9 @@ if [ "$USE_BUILTIN_PROXY" = "false" ]; then
 fi
 
 # Step 4: Database Configuration
-print_step 4 "Database & Storage Configuration"
+print_step 4 "Database Configuration"
 
-print_info "Generating secure credentials for all services..."
+print_info "Generating secure credentials for database services..."
 echo ""
 
 # PostgreSQL
@@ -554,12 +554,6 @@ LIVEKIT_API_KEY="API$(generate_secret 12 | tr '[:lower:]' '[:upper:]')"
 LIVEKIT_API_SECRET=$(generate_secret 32)
 print_success "LiveKit credentials generated."
 
-# S3/Garage Storage Credentials
-S3_ACCESS_KEY="NEON$(generate_secret 16 | tr '[:lower:]' '[:upper:]')"
-S3_SECRET_KEY=$(generate_secret 40)
-S3_BUCKET="neon-storage"
-print_success "S3 storage credentials generated."
-
 # Encryption Key
 ENCRYPTION_KEY=$(generate_secret 32)
 print_success "Encryption key generated."
@@ -568,8 +562,90 @@ print_success "Encryption key generated."
 SESSION_SECRET=$(generate_secret 32)
 print_success "Session secret generated."
 
-# Step 5: Advanced Options
-print_step 5 "Advanced Options"
+# Step 5: S3 Storage Configuration
+print_step 5 "S3 Storage Configuration"
+
+echo "NEON requires S3-compatible object storage for file uploads,"
+echo "attachments, and media storage."
+echo ""
+echo "Choose your S3 storage option:"
+echo ""
+echo "  1) Built-in Garage (recommended for self-hosted)"
+echo "     - Lightweight S3-compatible storage included with NEON"
+echo "     - No external services required"
+echo ""
+echo "  2) External S3 service (AWS S3, Wasabi, Backblaze, etc.)"
+echo "     - Configure connection via environment variables"
+echo "     - Includes options for path-style and SSL settings"
+echo ""
+echo "  3) Frontend-configurable (admin settings)"
+echo "     - Configure S3 settings from the web admin panel"
+echo "     - Flexible for multi-tenant or changing configurations"
+echo ""
+
+prompt "Enter choice" "1" S3_CHOICE
+
+case "$S3_CHOICE" in
+    1)
+        S3_MODE="builtin"
+        print_success "Using built-in Garage S3 storage."
+        echo ""
+        print_info "Generating Garage credentials..."
+        S3_ACCESS_KEY="NEON$(generate_secret 16 | tr '[:lower:]' '[:upper:]')"
+        S3_SECRET_KEY=$(generate_secret 40)
+        S3_BUCKET="neon-storage"
+        S3_ENDPOINT="http://garage:3900"
+        S3_REGION="garage"
+        S3_FORCE_PATH_STYLE="true"
+        S3_IGNORE_SSL="false"
+        print_success "Garage credentials generated."
+        ;;
+    2)
+        S3_MODE="external"
+        print_info "Configure your external S3 service:"
+        echo ""
+        prompt "S3 Endpoint URL (e.g., https://s3.amazonaws.com)" "" S3_ENDPOINT
+        prompt "S3 Region (e.g., us-east-1)" "us-east-1" S3_REGION
+        prompt "S3 Bucket name" "neon-storage" S3_BUCKET
+        prompt "S3 Access Key ID" "" S3_ACCESS_KEY
+        prompt "S3 Secret Access Key" "" S3_SECRET_KEY
+        echo ""
+        print_info "Advanced S3 options:"
+        prompt_yes_no "Use path-style URLs? (required for MinIO, Garage, some S3-compatible)" "n" S3_FORCE_PATH_STYLE
+        prompt_yes_no "Ignore SSL certificate errors? (not recommended for production)" "n" S3_IGNORE_SSL
+        print_success "External S3 configured."
+        ;;
+    3)
+        S3_MODE="frontend"
+        print_info "S3 will be configured from the admin panel after installation."
+        echo ""
+        print_warning "Note: File uploads will not work until S3 is configured in admin settings."
+        echo ""
+        # Set placeholder values
+        S3_ACCESS_KEY=""
+        S3_SECRET_KEY=""
+        S3_BUCKET="neon-storage"
+        S3_ENDPOINT=""
+        S3_REGION=""
+        S3_FORCE_PATH_STYLE="true"
+        S3_IGNORE_SSL="false"
+        print_success "Frontend S3 configuration enabled."
+        ;;
+    *)
+        print_warning "Invalid choice. Using built-in Garage."
+        S3_MODE="builtin"
+        S3_ACCESS_KEY="NEON$(generate_secret 16 | tr '[:lower:]' '[:upper:]')"
+        S3_SECRET_KEY=$(generate_secret 40)
+        S3_BUCKET="neon-storage"
+        S3_ENDPOINT="http://garage:3900"
+        S3_REGION="garage"
+        S3_FORCE_PATH_STYLE="true"
+        S3_IGNORE_SSL="false"
+        ;;
+esac
+
+# Step 6: Advanced Options
+print_step 6 "Advanced Options"
 
 prompt_yes_no "Enable federation (cross-instance communication)?" "n" ENABLE_FEDERATION
 prompt_yes_no "Enable email notifications?" "n" ENABLE_EMAIL
@@ -583,8 +659,8 @@ if [ "$ENABLE_EMAIL" = "true" ]; then
     prompt "From email address" "neon@$BASE_DOMAIN" SMTP_FROM
 fi
 
-# Step 6: Generate Configuration Files
-print_step 6 "Generating Configuration Files"
+# Step 7: Generate Configuration Files
+print_step 7 "Generating Configuration Files"
 
 # Create directories
 mkdir -p "$PROJECT_ROOT/docker/configs"
@@ -625,12 +701,15 @@ LIVEKIT_API_URL=https://$LIVEKIT_DOMAIN
 LIVEKIT_API_KEY=$LIVEKIT_API_KEY
 LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET
 
-# S3 Storage (Garage)
-S3_ENDPOINT=http://garage:3900
-S3_REGION=garage
+# S3 Storage Configuration
+S3_MODE=$S3_MODE
+S3_ENDPOINT=$S3_ENDPOINT
+S3_REGION=$S3_REGION
 S3_BUCKET=$S3_BUCKET
 S3_ACCESS_KEY=$S3_ACCESS_KEY
 S3_SECRET_KEY=$S3_SECRET_KEY
+S3_FORCE_PATH_STYLE=$S3_FORCE_PATH_STYLE
+S3_IGNORE_SSL=$S3_IGNORE_SSL
 
 # Encryption
 ENCRYPTION_KEY=$ENCRYPTION_KEY
@@ -743,20 +822,69 @@ room:
 EOF
 print_success "LiveKit configuration created."
 
-# Generate Garage config
-print_info "Creating Garage S3 configuration..."
-cat > "$PROJECT_ROOT/docker/configs/garage.toml" << EOF
+# Generate Garage config only if using built-in S3
+if [ "$S3_MODE" = "builtin" ]; then
+    print_info "Creating Garage S3 configuration..."
+
+    # Copy Garage Dockerfile to configs
+    mkdir -p "$PROJECT_ROOT/docker/garage"
+    if [ -f "$PROJECT_ROOT/docker/garage/Dockerfile" ]; then
+        print_success "Garage Dockerfile already exists."
+    else
+        cat > "$PROJECT_ROOT/docker/garage/Dockerfile" << 'DOCKEREOF'
+# Garage S3-compatible storage with Alpine base
+FROM alpine:3.19 as downloader
+
+ARG GARAGE_VERSION=v0.9.3
+ARG TARGETARCH
+
+RUN apk add --no-cache curl
+
+RUN case "${TARGETARCH}" in \
+    amd64) ARCH="x86_64" ;; \
+    arm64) ARCH="aarch64" ;; \
+    *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://garagehq.deuxfleurs.fr/_releases/${GARAGE_VERSION}/${ARCH}-unknown-linux-musl/garage" -o /garage && \
+    chmod +x /garage
+
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata wget
+
+COPY --from=downloader /garage /usr/local/bin/garage
+
+RUN mkdir -p /var/lib/garage/data /var/lib/garage/meta /etc/garage && \
+    addgroup -S garage && adduser -S garage -G garage && \
+    chown -R garage:garage /var/lib/garage
+
+VOLUME ["/var/lib/garage/data", "/var/lib/garage/meta"]
+
+EXPOSE 3900 3901 3902
+
+ENV GARAGE_CONFIG_FILE=/etc/garage.toml
+
+USER garage
+
+ENTRYPOINT ["/usr/local/bin/garage"]
+CMD ["server"]
+DOCKEREOF
+        print_success "Garage Dockerfile created."
+    fi
+
+    cat > "$PROJECT_ROOT/docker/configs/garage.toml" << EOF
 # Garage S3-compatible Storage Configuration
 # Generated by setup script
 
 metadata_dir = "/var/lib/garage/meta"
 data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
 
 replication_mode = "none"
 
-rpc_bind_addr = "[::]:3901"
-rpc_public_addr = "garage:3901"
-rpc_secret = "$(generate_secret 32)"
+[rpc]
+bind_addr = "[::]:3901"
+secret = "$(generate_secret 32)"
 
 [s3_api]
 s3_region = "garage"
@@ -769,8 +897,12 @@ root_domain = ".web.garage.localhost"
 
 [admin]
 api_bind_addr = "[::]:3903"
+admin_token = "$(generate_secret 32)"
 EOF
-print_success "Garage configuration created."
+    print_success "Garage configuration created."
+else
+    print_info "Skipping Garage configuration (using external S3)."
+fi
 
 # Generate appropriate Docker Compose file
 if [ "$USE_BUILTIN_PROXY" = "true" ]; then
@@ -847,18 +979,6 @@ services:
     networks:
       - neon
 
-  # Garage S3 Storage
-  garage:
-    image: dxflrs/garage:v0.9.0
-    restart: unless-stopped
-    volumes:
-      - ./configs/garage.toml:/etc/garage.toml:ro
-      - garage_meta:/var/lib/garage/meta
-      - garage_data:/var/lib/garage/data
-    command: -c /etc/garage.toml server
-    networks:
-      - neon
-
   # NEON API Server
   api:
     build:
@@ -872,8 +992,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      garage:
-        condition: service_started
     networks:
       - neon
 
@@ -893,13 +1011,55 @@ volumes:
   caddy_config:
   postgres_data:
   redis_data:
-  garage_meta:
-  garage_data:
 
 networks:
   neon:
     driver: bridge
 EOF
+
+    # Add Garage service if using built-in S3
+    if [ "$S3_MODE" = "builtin" ]; then
+        print_info "Adding Garage S3 storage service..."
+        # Insert Garage service before API service
+        sed -i '/# NEON API Server/i\
+  # Garage S3 Storage (built-in)\
+  garage:\
+    build:\
+      context: ./garage\
+      dockerfile: Dockerfile\
+    restart: unless-stopped\
+    environment:\
+      - GARAGE_CONFIG_FILE=/etc/garage.toml\
+    volumes:\
+      - ./configs/garage.toml:/etc/garage.toml:ro\
+      - garage_meta:/var/lib/garage/meta\
+      - garage_data:/var/lib/garage/data\
+    ports:\
+      - "3900:3900"\
+      - "3901:3901"\
+    healthcheck:\
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3900"]\
+      interval: 30s\
+      timeout: 10s\
+      retries: 3\
+    networks:\
+      - neon\
+\
+' "$PROJECT_ROOT/docker/docker-compose.yml"
+
+        # Add garage volumes
+        sed -i '/^volumes:/a\
+  garage_meta:\
+  garage_data:' "$PROJECT_ROOT/docker/docker-compose.yml"
+
+        # Add garage dependency to api
+        sed -i '/depends_on:/,/networks:/{
+            /redis:/a\
+      garage:\
+        condition: service_healthy
+        }' "$PROJECT_ROOT/docker/docker-compose.yml"
+    fi
+
     print_success "Docker Compose file created."
 
     # Generate Caddyfile
@@ -1038,18 +1198,6 @@ services:
     networks:
       - neon
 
-  # Garage S3 Storage
-  garage:
-    image: dxflrs/garage:v0.9.0
-    restart: unless-stopped
-    volumes:
-      - ./configs/garage.toml:/etc/garage.toml:ro
-      - garage_meta:/var/lib/garage/meta
-      - garage_data:/var/lib/garage/data
-    command: -c /etc/garage.toml server
-    networks:
-      - neon
-
   # NEON API Server
   api:
     build:
@@ -1065,8 +1213,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      garage:
-        condition: service_started
     networks:
       - neon
 
@@ -1086,13 +1232,55 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  garage_meta:
-  garage_data:
 
 networks:
   neon:
     driver: bridge
 EOF
+
+    # Add Garage service if using built-in S3
+    if [ "$S3_MODE" = "builtin" ]; then
+        print_info "Adding Garage S3 storage service..."
+        # Insert Garage service before API service
+        sed -i '/# NEON API Server/i\
+  # Garage S3 Storage (built-in)\
+  garage:\
+    build:\
+      context: ./garage\
+      dockerfile: Dockerfile\
+    restart: unless-stopped\
+    environment:\
+      - GARAGE_CONFIG_FILE=/etc/garage.toml\
+    volumes:\
+      - ./configs/garage.toml:/etc/garage.toml:ro\
+      - garage_meta:/var/lib/garage/meta\
+      - garage_data:/var/lib/garage/data\
+    ports:\
+      - "3900:3900"\
+      - "3901:3901"\
+    healthcheck:\
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3900"]\
+      interval: 30s\
+      timeout: 10s\
+      retries: 3\
+    networks:\
+      - neon\
+\
+' "$PROJECT_ROOT/docker/docker-compose.yml"
+
+        # Add garage volumes
+        sed -i '/^volumes:/a\
+  garage_meta:\
+  garage_data:' "$PROJECT_ROOT/docker/docker-compose.yml"
+
+        # Add garage dependency to api
+        sed -i '/depends_on:/,/networks:/{
+            /redis:/a\
+      garage:\
+        condition: service_healthy
+        }' "$PROJECT_ROOT/docker/docker-compose.yml"
+    fi
+
     print_success "Docker Compose file created."
     print_info "Services will bind to: ${BIND_ADDRESS}"
 fi
@@ -1199,7 +1387,7 @@ read -r
 
 # Start Docker
 echo ""
-print_step "7" "Starting NEON Services"
+print_step "8" "Starting NEON Services"
 echo ""
 print_info "Starting Docker containers..."
 
