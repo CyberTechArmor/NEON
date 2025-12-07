@@ -118,29 +118,157 @@ generate_password() {
     openssl rand -base64 "$length" 2>/dev/null | tr -dc 'a-zA-Z0-9' | head -c "$length"
 }
 
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$ID
+        OS_VERSION=$VERSION_ID
+    elif [ -f /etc/debian_version ]; then
+        OS="debian"
+    elif [ -f /etc/redhat-release ]; then
+        OS="rhel"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        OS="macos"
+    else
+        OS="unknown"
+    fi
+}
+
+install_docker() {
+    print_info "Installing Docker..."
+    echo ""
+
+    detect_os
+
+    case "$OS" in
+        ubuntu|debian|pop)
+            echo "  Detected: $OS"
+            echo "  Installing Docker via official script..."
+            echo ""
+
+            # Install prerequisites
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ca-certificates curl gnupg lsb-release
+
+            # Use Docker's convenience script
+            curl -fsSL https://get.docker.com | sudo sh
+
+            # Add current user to docker group
+            sudo usermod -aG docker "$USER"
+
+            print_success "Docker installed successfully."
+            print_warning "You may need to log out and back in for group changes to take effect."
+            ;;
+
+        fedora|rhel|centos|rocky|alma)
+            echo "  Detected: $OS"
+            echo "  Installing Docker via official script..."
+            echo ""
+
+            # Use Docker's convenience script
+            curl -fsSL https://get.docker.com | sudo sh
+
+            # Start and enable Docker
+            sudo systemctl start docker
+            sudo systemctl enable docker
+
+            # Add current user to docker group
+            sudo usermod -aG docker "$USER"
+
+            print_success "Docker installed successfully."
+            print_warning "You may need to log out and back in for group changes to take effect."
+            ;;
+
+        arch|manjaro)
+            echo "  Detected: $OS"
+            echo "  Installing Docker via pacman..."
+            echo ""
+
+            sudo pacman -Sy --noconfirm docker docker-compose
+            sudo systemctl start docker
+            sudo systemctl enable docker
+            sudo usermod -aG docker "$USER"
+
+            print_success "Docker installed successfully."
+            ;;
+
+        macos)
+            echo "  Detected: macOS"
+            echo ""
+            print_error "Please install Docker Desktop for Mac manually:"
+            echo "    https://docs.docker.com/desktop/install/mac-install/"
+            echo ""
+            echo "  After installing, run this script again."
+            exit 1
+            ;;
+
+        *)
+            print_error "Unsupported operating system: $OS"
+            echo ""
+            echo "Please install Docker manually:"
+            echo "  https://docs.docker.com/get-docker/"
+            exit 1
+            ;;
+    esac
+}
+
 check_dependencies() {
-    local missing=()
+    local docker_missing=false
+    local compose_missing=false
 
     if ! command -v docker &> /dev/null; then
-        missing+=("docker")
+        docker_missing=true
     fi
 
     if ! command -v docker compose &> /dev/null && ! command -v docker-compose &> /dev/null; then
-        missing+=("docker-compose")
+        compose_missing=true
     fi
 
-    if [ ${#missing[@]} -gt 0 ]; then
-        print_error "Missing required dependencies: ${missing[*]}"
+    if [ "$docker_missing" = true ]; then
+        print_warning "Docker is not installed."
         echo ""
-        echo "Please install Docker and Docker Compose before running this script."
-        echo "  - Docker: https://docs.docker.com/get-docker/"
-        echo "  - Docker Compose: https://docs.docker.com/compose/install/"
+        prompt_yes_no "Would you like to install Docker now?" "y" INSTALL_DOCKER
+
+        if [ "$INSTALL_DOCKER" = true ]; then
+            install_docker
+
+            # Verify installation
+            if ! command -v docker &> /dev/null; then
+                print_error "Docker installation failed. Please install manually."
+                exit 1
+            fi
+
+            # Check if we need to use sudo for docker or newgrp
+            if ! docker ps &>/dev/null; then
+                print_warning "Docker installed but requires logout/login for permissions."
+                echo ""
+                echo "  Options:"
+                echo "    1. Log out and back in, then run this script again"
+                echo "    2. Run: newgrp docker && ./scripts/setup.sh"
+                echo ""
+                exit 0
+            fi
+        else
+            print_error "Docker is required to run NEON."
+            echo ""
+            echo "Install Docker manually: https://docs.docker.com/get-docker/"
+            exit 1
+        fi
+    fi
+
+    # Re-check compose after potential Docker installation
+    if ! command -v docker compose &> /dev/null && ! command -v docker-compose &> /dev/null; then
+        print_error "Docker Compose is not available."
+        echo ""
+        echo "Docker Compose should be included with Docker. Try:"
+        echo "  - Updating Docker to the latest version"
+        echo "  - Or install docker-compose-plugin: sudo apt install docker-compose-plugin"
         exit 1
     fi
 }
 
 # Total steps for progress indicator
-TOTAL_STEPS=6
+TOTAL_STEPS=7
 
 #
 # MAIN SCRIPT
@@ -849,40 +977,183 @@ echo -e "    Password:     ${YELLOW}$ADMIN_PASSWORD${NC}"
 echo ""
 echo -e "  ${RED}${BOLD}⚠ SAVE THESE CREDENTIALS! They won't be shown again.${NC}"
 echo ""
-echo -e "${BOLD}Next Steps:${NC}"
+
+# Show proxy configuration if not using built-in
+if [ "$USE_BUILTIN_PROXY" = "false" ] && [ "$PROXY_TYPE" != "manual" ]; then
+    echo -e "${BOLD}Reverse Proxy Configuration:${NC}"
+    echo ""
+    echo -e "  ${CYAN}Generated config file:${NC} docker/proxy-configs/"
+    echo ""
+    case "$PROXY_TYPE" in
+        nginx)
+            echo -e "  ${BOLD}Nginx Setup:${NC}"
+            echo "    1. Copy config: sudo cp docker/proxy-configs/nginx.conf /etc/nginx/sites-available/neon.conf"
+            echo "    2. Enable site: sudo ln -s /etc/nginx/sites-available/neon.conf /etc/nginx/sites-enabled/"
+            echo "    3. Get SSL:     sudo certbot --nginx -d $DOMAIN${LIVEKIT_SEPARATE_DOMAIN:+ -d $LIVEKIT_DOMAIN}"
+            echo "    4. Reload:      sudo nginx -t && sudo systemctl reload nginx"
+            ;;
+        caddy)
+            echo -e "  ${BOLD}Caddy Setup:${NC}"
+            echo "    1. Copy config: sudo cp docker/proxy-configs/Caddyfile /etc/caddy/Caddyfile"
+            echo "    2. Reload:      sudo systemctl reload caddy"
+            echo "    (Caddy will automatically obtain SSL certificates)"
+            ;;
+        haproxy)
+            echo -e "  ${BOLD}HAProxy Setup:${NC}"
+            echo "    1. Copy config: sudo cp docker/proxy-configs/haproxy.cfg /etc/haproxy/haproxy.cfg"
+            echo "    2. Get SSL:     sudo certbot certonly --standalone -d $DOMAIN${LIVEKIT_SEPARATE_DOMAIN:+ -d $LIVEKIT_DOMAIN}"
+            echo "    3. Combine:     sudo cat /etc/letsencrypt/live/$DOMAIN/{fullchain,privkey}.pem > /etc/haproxy/certs/$DOMAIN.pem"
+            echo "    4. Reload:      sudo systemctl reload haproxy"
+            ;;
+        traefik)
+            echo -e "  ${BOLD}Traefik Setup:${NC}"
+            echo "    1. Copy configs: sudo cp docker/proxy-configs/traefik.yml /etc/traefik/"
+            echo "                     sudo cp docker/proxy-configs/traefik-dynamic.yml /etc/traefik/dynamic/"
+            echo "    2. Create ACME: sudo touch /etc/traefik/acme.json && sudo chmod 600 /etc/traefik/acme.json"
+            echo "    3. Restart:     sudo systemctl restart traefik"
+            ;;
+        apache)
+            echo -e "  ${BOLD}Apache Setup:${NC}"
+            echo "    1. Enable mods: sudo a2enmod proxy proxy_http proxy_wstunnel ssl headers rewrite"
+            echo "    2. Copy config: sudo cp docker/proxy-configs/apache.conf /etc/apache2/sites-available/neon.conf"
+            echo "    3. Enable site: sudo a2ensite neon"
+            echo "    4. Get SSL:     sudo certbot --apache -d $DOMAIN${LIVEKIT_SEPARATE_DOMAIN:+ -d $LIVEKIT_DOMAIN}"
+            echo "    5. Reload:      sudo systemctl reload apache2"
+            ;;
+    esac
+    echo ""
+    echo -e "  ${CYAN}Service ports (for your proxy to connect to):${NC}"
+    echo "    - API:      localhost:3001"
+    echo "    - Web:      localhost:3000"
+    echo "    - LiveKit:  localhost:7880"
+    echo ""
+fi
+
+# Pause for user to save credentials
+echo -e "${CYAN}────────────────────────────────────────${NC}"
+echo ""
+if [ "$USE_BUILTIN_PROXY" = "true" ]; then
+    echo -e "${BOLD}Before continuing, make sure your domain(s) point to this server:${NC}"
+    SERVER_IP=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || curl -s --connect-timeout 5 icanhazip.com 2>/dev/null || echo '<your-server-ip>')
+    echo "  - $DOMAIN -> $SERVER_IP"
+    if [ "$LIVEKIT_SEPARATE_DOMAIN" = "true" ]; then
+        echo "  - $LIVEKIT_DOMAIN -> $SERVER_IP"
+    fi
+    echo ""
+fi
+
+echo -e "${YELLOW}${BOLD}Press Enter to start NEON (or Ctrl+C to exit and start manually later)...${NC}"
+read -r
+
+# Start Docker
+echo ""
+print_step "7" "Starting NEON Services"
+echo ""
+print_info "Starting Docker containers..."
+
+cd "$PROJECT_ROOT/docker"
+
+# Check if docker compose or docker-compose should be used
+if command -v docker compose &> /dev/null; then
+    DOCKER_COMPOSE="docker compose"
+else
+    DOCKER_COMPOSE="docker-compose"
+fi
+
+# Start services
+$DOCKER_COMPOSE up -d
+
+if [ $? -ne 0 ]; then
+    print_error "Failed to start Docker containers."
+    echo ""
+    echo "Please check the error above and try running manually:"
+    echo -e "  ${CYAN}cd docker && docker compose up -d${NC}"
+    exit 1
+fi
+
+print_success "Docker containers started."
 echo ""
 
-if [ "$USE_BUILTIN_PROXY" = "true" ]; then
-echo "  1. Make sure your domain(s) point to this server:"
-echo "     - $DOMAIN -> $(curl -s ifconfig.me 2>/dev/null || echo '<your-server-ip>')"
-if [ "$LIVEKIT_SEPARATE_DOMAIN" = "true" ]; then
-echo "     - $LIVEKIT_DOMAIN -> $(curl -s ifconfig.me 2>/dev/null || echo '<your-server-ip>')"
-fi
+# Wait for services to be healthy
+print_info "Waiting for services to be ready..."
 echo ""
-echo "  2. Start NEON:"
-echo -e "     ${CYAN}cd docker && docker compose up -d${NC}"
+
+# Wait for PostgreSQL
+echo -n "  Waiting for PostgreSQL..."
+for i in {1..30}; do
+    if $DOCKER_COMPOSE exec -T postgres pg_isready -U neon -d neon &>/dev/null; then
+        echo -e " ${GREEN}ready${NC}"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo -e " ${YELLOW}timeout (continuing anyway)${NC}"
+    fi
+    sleep 2
+done
+
+# Wait for Redis
+echo -n "  Waiting for Redis..."
+for i in {1..30}; do
+    if $DOCKER_COMPOSE exec -T redis redis-cli -a "$REDIS_PASSWORD" ping &>/dev/null; then
+        echo -e " ${GREEN}ready${NC}"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo -e " ${YELLOW}timeout (continuing anyway)${NC}"
+    fi
+    sleep 2
+done
+
+# Wait for API to be built and running
+echo -n "  Waiting for API..."
+for i in {1..60}; do
+    if $DOCKER_COMPOSE exec -T api wget -q --spider http://localhost:3001/api/health 2>/dev/null; then
+        echo -e " ${GREEN}ready${NC}"
+        break
+    fi
+    if [ $i -eq 60 ]; then
+        echo -e " ${YELLOW}timeout (continuing anyway)${NC}"
+    fi
+    sleep 3
+done
+
 echo ""
-echo "  3. Initialize the database:"
-echo -e "     ${CYAN}docker compose exec api npm run db:migrate${NC}"
-echo -e "     ${CYAN}docker compose exec api npm run db:seed${NC}"
+
+# Initialize database
+print_info "Initializing database..."
 echo ""
-echo "  4. Access NEON at: https://$DOMAIN"
+
+echo "  Running migrations..."
+if $DOCKER_COMPOSE exec -T api npm run db:migrate 2>&1 | grep -v "^>" | head -20; then
+    print_success "Database migrations complete."
 else
-echo "  1. Configure your reverse proxy using the generated config:"
-echo -e "     ${CYAN}cat docker/proxy-configs/${PROXY_TYPE}.conf${NC}"
-echo ""
-echo "  2. Make sure ports are accessible:"
-echo "     - API:      localhost:3001"
-echo "     - Web:      localhost:3000"
-echo "     - LiveKit:  localhost:7880"
-echo ""
-echo "  3. Start NEON:"
-echo -e "     ${CYAN}cd docker && docker compose up -d${NC}"
-echo ""
-echo "  4. Initialize the database:"
-echo -e "     ${CYAN}docker compose exec api npm run db:migrate${NC}"
-echo -e "     ${CYAN}docker compose exec api npm run db:seed${NC}"
+    print_warning "Migration may have had issues. Check logs if needed."
 fi
+
+echo ""
+echo "  Seeding initial data..."
+if $DOCKER_COMPOSE exec -T api npm run db:seed 2>&1 | grep -v "^>" | head -20; then
+    print_success "Database seeding complete."
+else
+    print_warning "Seeding may have had issues. Check logs if needed."
+fi
+
+# Final summary
+echo ""
+echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}${BOLD}                    NEON IS RUNNING!                         ${NC}"
+echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════${NC}"
+echo ""
+echo -e "  ${CYAN}Access NEON at:${NC}  https://$DOMAIN"
+echo ""
+echo -e "  ${CYAN}Admin Login:${NC}"
+echo "    Username:     $ADMIN_USERNAME"
+echo -e "    Password:     ${YELLOW}$ADMIN_PASSWORD${NC}"
+echo ""
+echo -e "  ${CYAN}Useful Commands:${NC}"
+echo "    View logs:    cd docker && docker compose logs -f"
+echo "    Stop NEON:    cd docker && docker compose down"
+echo "    Restart:      cd docker && docker compose restart"
 echo ""
 echo -e "${GREEN}${BOLD}Happy collaborating!${NC}"
 echo ""
