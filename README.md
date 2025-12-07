@@ -62,8 +62,8 @@ The easiest way to deploy NEON is using the interactive setup wizard:
 
 ```bash
 # Clone the repository
-git clone https://github.com/fractionate/neon.git
-cd neon
+git clone https://github.com/CyberTechArmor/NEON.git
+cd NEON
 
 # Run the setup wizard
 ./scripts/setup.sh
