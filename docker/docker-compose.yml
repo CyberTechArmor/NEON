@@ -62,8 +62,8 @@ services:
     image: dxflrs/garage:v0.9.3
     container_name: neon-garage
     restart: unless-stopped
-    entrypoint: ["/garage"]
-    command: ["server"]
+    entrypoint: []
+    command: ["/garage", "server"]
     environment:
       - GARAGE_ALLOW_WORLD_READABLE_SECRETS=true
     volumes:
