@@ -93,6 +93,67 @@ async function runMigrations(): Promise<boolean> {
 }
 
 /**
+ * Check if database has been seeded (has users and organizations)
+ */
+async function checkDatabaseSeeded(): Promise<boolean> {
+  try {
+    const userCount = await prisma.user.count();
+    const orgCount = await prisma.organization.count();
+    return userCount > 0 && orgCount > 0;
+  } catch {
+    // Tables might not exist yet
+    return false;
+  }
+}
+
+/**
+ * Run database seed script
+ */
+async function runSeed(): Promise<boolean> {
+  console.log('[Database] Running seed script...');
+
+  try {
+    // Check for compiled seed.js first, then fall back to ts-node
+    const seedJsPath = path.resolve(__dirname, '../prisma/seed.js');
+    const seedTsPath = path.resolve(__dirname, '../prisma/seed.ts');
+    const fs = await import('fs');
+
+    if (fs.existsSync(seedJsPath)) {
+      execSync(`node "${seedJsPath}"`, {
+        stdio: 'inherit',
+        cwd: path.resolve(__dirname, '..'),
+        env: {
+          ...process.env,
+          ADMIN_EMAIL: process.env.ADMIN_EMAIL || 'thomas@tagarmor.com',
+          ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'd9zuzaZ9b2BMjm6x',
+          ADMIN_USERNAME: process.env.ADMIN_USERNAME || 'thomas',
+        },
+      });
+    } else if (fs.existsSync(seedTsPath)) {
+      execSync(`npx ts-node "${seedTsPath}"`, {
+        stdio: 'inherit',
+        cwd: path.resolve(__dirname, '..'),
+        env: {
+          ...process.env,
+          ADMIN_EMAIL: process.env.ADMIN_EMAIL || 'thomas@tagarmor.com',
+          ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'd9zuzaZ9b2BMjm6x',
+          ADMIN_USERNAME: process.env.ADMIN_USERNAME || 'thomas',
+        },
+      });
+    } else {
+      console.warn('[Database] No seed script found at', seedJsPath, 'or', seedTsPath);
+      return false;
+    }
+
+    console.log('[Database] Seed completed successfully');
+    return true;
+  } catch (error) {
+    console.error('[Database] Seed failed:', error);
+    return false;
+  }
+}
+
+/**
  * Connect to the database
  * Call this during application startup
  */
@@ -111,6 +172,19 @@ export async function connectDatabase(): Promise<void> {
       if (!success) {
         console.warn('[Database] WARNING: Migrations could not be applied automatically.');
         console.warn('[Database] Please run: npx prisma migrate deploy');
+      }
+    }
+
+    // Check if database needs to be seeded
+    const isSeeded = await checkDatabaseSeeded();
+
+    if (!isSeeded) {
+      console.log('[Database] Database is empty, running seed...');
+      const seedSuccess = await runSeed();
+
+      if (!seedSuccess) {
+        console.warn('[Database] WARNING: Database could not be seeded automatically.');
+        console.warn('[Database] Please run: npm run db:seed');
       }
     }
   } catch (error) {
