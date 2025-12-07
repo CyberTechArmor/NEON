@@ -31,10 +31,20 @@ RUN npm install
 COPY apps/api ./apps/api
 COPY packages ./packages
 
-# Generate Prisma client directly (skip turbo for Docker builds)
+# Build packages in correct dependency order
+# 1. Build @neon/config (no internal dependencies)
+RUN cd packages/config && npm run build
+
+# 2. Build @neon/shared (no internal dependencies)
+RUN cd packages/shared && npm run build
+
+# 3. Generate Prisma client
 RUN npx prisma generate --schema=packages/database/prisma/schema.prisma
 
-# Build the API (skip turbo, build directly)
+# 4. Build @neon/database (depends on prisma client)
+RUN cd packages/database && npm run build
+
+# 5. Build the API (depends on config, shared, database)
 RUN cd apps/api && npm run build
 
 # Production stage
@@ -53,6 +63,7 @@ RUN addgroup --system --gid 1001 nodejs && \
 # Copy package files
 COPY package*.json ./
 COPY apps/api/package*.json ./apps/api/
+COPY packages/config/package*.json ./packages/config/
 COPY packages/database/package*.json ./packages/database/
 COPY packages/shared/package*.json ./packages/shared/
 
@@ -67,7 +78,9 @@ RUN npx prisma generate --schema=packages/database/prisma/schema.prisma
 
 # Copy built files from builder
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/packages/config/dist ./packages/config/dist
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
+COPY --from=builder /app/packages/database/dist ./packages/database/dist
 
 # Switch to non-root user
 USER neon
