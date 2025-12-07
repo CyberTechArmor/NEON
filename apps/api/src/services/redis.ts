@@ -4,7 +4,7 @@
  * Redis client for caching, pub/sub, and session management
  */
 
-import Redis from 'ioredis';
+import Redis, { RedisOptions } from 'ioredis';
 import { getConfig } from '@neon/config';
 
 const config = getConfig();
@@ -16,10 +16,10 @@ let publisher: Redis | null = null;
 /**
  * Get Redis client options
  */
-function getRedisOptions(): ConstructorParameters<typeof Redis>[0] {
+function getRedisOptions(): RedisOptions {
   const url = new URL(config.redis.url);
 
-  return {
+  const options: RedisOptions = {
     host: url.hostname,
     port: parseInt(url.port) || 6379,
     password: config.redis.password || undefined,
@@ -36,6 +36,8 @@ function getRedisOptions(): ConstructorParameters<typeof Redis>[0] {
       return targetErrors.some((e) => err.message.includes(e));
     },
   };
+
+  return options;
 }
 
 /**

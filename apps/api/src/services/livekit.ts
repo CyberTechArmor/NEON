@@ -163,7 +163,8 @@ export async function startRecording(
     fileType: EncodedFileType.MP4,
   });
 
-  const info = await egress.startRoomCompositeEgress(roomName, output);
+  // Cast to any to avoid ESM/CJS type resolution conflicts
+  const info = await egress.startRoomCompositeEgress(roomName, output as any);
 
   return info.egressId;
 }

@@ -374,6 +374,7 @@ export async function sendNotification(
       io.to(Array.from(sockets)).emit(SocketEvents.NOTIFICATION, {
         ...notification,
         body: notification.body ?? null,
+        data: notification.data ?? null,
         createdAt: new Date().toISOString(),
       });
     }
