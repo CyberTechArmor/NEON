@@ -1,5 +1,5 @@
 # =============================================================================
-# Garage S3-Compatible Storage Configuration
+# Garage S3-Compatible Storage Configuration (v0.9.x format)
 # =============================================================================
 # Documentation: https://garagehq.deuxfleurs.fr/documentation/reference-manual/configuration/
 # =============================================================================
@@ -8,11 +8,10 @@ metadata_dir = "/var/lib/garage/meta"
 data_dir = "/var/lib/garage/data"
 db_engine = "sqlite"
 
-replication_mode = "none"
+replication_factor = 1
 
-[rpc]
-bind_addr = "[::]:3901"
-secret = "DEVELOPMENT_SECRET_CHANGE_IN_PRODUCTION_1234567890abcdef"
+rpc_bind_addr = "[::]:3901"
+rpc_secret = "DEVELOPMENT_SECRET_CHANGE_IN_PRODUCTION_1234567890abcdef"
 
 [s3_api]
 s3_region = "garage"
@@ -24,7 +23,7 @@ bind_addr = "[::]:3902"
 root_domain = ".web.garage.localhost"
 
 [admin]
-api_bind_addr = "[::]:3901"
+api_bind_addr = "[::]:3903"
 admin_token = "ADMIN_TOKEN_CHANGE_IN_PRODUCTION"
 
 # Bucket configurations are created via garage CLI after startup

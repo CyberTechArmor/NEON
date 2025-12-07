@@ -100,6 +100,10 @@ COPY --from=builder --chown=neon:nodejs /app/packages/config/package.json ./pack
 COPY --from=builder --chown=neon:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=neon:nodejs /app/package.json ./
 
+# Copy entrypoint script
+COPY --chown=neon:nodejs docker/docker-entrypoint-api.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 USER neon
 
 EXPOSE 3001
@@ -107,5 +111,4 @@ EXPOSE 3001
 ENV NODE_ENV=production
 
 # Use dumb-init to handle signals properly
-ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "apps/api/dist/index.js"]
+ENTRYPOINT ["dumb-init", "--", "/usr/local/bin/docker-entrypoint.sh"]
