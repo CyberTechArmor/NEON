@@ -18,6 +18,7 @@ import {
   X,
   Check,
   Loader2,
+  MessageSquare,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useChatStore } from '../stores/chat';
@@ -260,7 +261,7 @@ export default function ChatPage() {
     queryKey: ['conversations'],
     queryFn: async () => {
       const response = await conversationsApi.list({ limit: 50 });
-      setConversations(response.data.data);
+      setConversations(response.data.data as any);
       return response.data.data;
     },
   });
@@ -271,7 +272,7 @@ export default function ChatPage() {
     queryFn: async () => {
       if (!conversationId) return [];
       const response = await messagesApi.list(conversationId, { limit: 50 });
-      setMessages(conversationId, response.data.data.reverse());
+      setMessages(conversationId, (response.data.data as any[]).reverse());
       setHasMoreMessages(conversationId, response.data.meta?.pagination?.hasNext || false);
       return response.data.data;
     },
@@ -287,7 +288,7 @@ export default function ChatPage() {
     },
     onSuccess: (message) => {
       if (conversationId) {
-        addMessage(conversationId, message);
+        addMessage(conversationId, message as any);
       }
       setReplyTo(null);
     },

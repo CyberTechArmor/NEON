@@ -349,7 +349,7 @@ export default function UserManagement() {
   const [deletingUser, setDeletingUser] = useState<User | undefined>();
 
   // Fetch users
-  const { data: usersData, isLoading } = useQuery({
+  const { data: usersData, isLoading } = useQuery<{ data: User[]; meta?: { pagination?: { total: number; totalPages: number; hasPrev: boolean; hasNext: boolean } } }>({
     queryKey: ['admin', 'users', page, search, filters],
     queryFn: async () => {
       const response = await adminApi.users.list({
@@ -358,7 +358,7 @@ export default function UserManagement() {
         search: search || undefined,
         ...filters,
       });
-      return response.data;
+      return response.data as { data: User[]; meta?: { pagination?: { total: number; totalPages: number; hasPrev: boolean; hasNext: boolean } } };
     },
   });
 
