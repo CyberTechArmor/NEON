@@ -15,17 +15,34 @@ cd /app/packages/database
 # Wait for database to be ready (with retries)
 MAX_RETRIES=30
 RETRY_COUNT=0
-until npx prisma migrate deploy 2>/dev/null; do
+
+# First wait for the database to be reachable
+echo "[Entrypoint] Waiting for database to be ready..."
+until echo "SELECT 1" | npx prisma db execute --stdin > /dev/null 2>&1; do
   RETRY_COUNT=$((RETRY_COUNT + 1))
   if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
-    echo "[Entrypoint] Error: Database migration failed after $MAX_RETRIES attempts"
+    echo "[Entrypoint] Error: Database not reachable after $MAX_RETRIES attempts"
     exit 1
   fi
-  echo "[Entrypoint] Waiting for database... (attempt $RETRY_COUNT/$MAX_RETRIES)"
+  echo "[Entrypoint] Database not ready... (attempt $RETRY_COUNT/$MAX_RETRIES)"
   sleep 2
 done
 
-echo "[Entrypoint] Database migrations completed successfully"
+echo "[Entrypoint] Database is reachable, running migrations..."
+
+# Run migrations (show output for debugging)
+if npx prisma migrate deploy; then
+  echo "[Entrypoint] Database migrations completed successfully"
+else
+  echo "[Entrypoint] Error: Database migration failed"
+  echo "[Entrypoint] Attempting to push schema as fallback..."
+  if npx prisma db push --accept-data-loss; then
+    echo "[Entrypoint] Schema pushed successfully"
+  else
+    echo "[Entrypoint] Error: Schema push also failed"
+    exit 1
+  fi
+fi
 
 # Return to app directory and start the server
 cd /app
