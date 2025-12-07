@@ -100,7 +100,7 @@ const configSchema = z.object({
     user: z.string().optional(),
     pass: z.string().optional(),
     fromName: z.string().default('NEON'),
-    fromEmail: z.string().email().default('neon@localhost'),
+    fromEmail: z.string().email().default('neon@example.com'),
   }),
 
   // Rate Limiting
