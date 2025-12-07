@@ -8,6 +8,7 @@
 # Usage:
 #   ./scripts/docker-cleanup.sh         # Interactive mode (asks for confirmation)
 #   ./scripts/docker-cleanup.sh --force # Force mode (no confirmation)
+#   ./scripts/docker-cleanup.sh --all   # Remove everything including base images
 # =============================================================================
 
 set -e
@@ -20,6 +21,7 @@ DOCKER_DIR="$PROJECT_ROOT/docker"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${YELLOW}==============================================================================${NC}"
@@ -27,19 +29,30 @@ echo -e "${YELLOW}NEON Platform - Docker Cleanup Script${NC}"
 echo -e "${YELLOW}==============================================================================${NC}"
 echo ""
 
-# Check for force flag
+# Check for flags
 FORCE=false
-if [[ "$1" == "--force" ]] || [[ "$1" == "-f" ]]; then
-    FORCE=true
-fi
+REMOVE_ALL=false
+for arg in "$@"; do
+    case $arg in
+        --force|-f)
+            FORCE=true
+            ;;
+        --all|-a)
+            REMOVE_ALL=true
+            ;;
+    esac
+done
 
 # Warning and confirmation
 if [[ "$FORCE" != true ]]; then
     echo -e "${RED}WARNING: This will remove all NEON Docker resources:${NC}"
-    echo "  - All NEON containers (neon-*)"
-    echo "  - All NEON images"
-    echo "  - All NEON volumes (postgres_data, redis_data, garage_data, etc.)"
-    echo "  - NEON network"
+    echo "  - All NEON and docker_* containers"
+    echo "  - All built images (api, web)"
+    echo "  - All volumes (postgres, redis, minio, etc.)"
+    echo "  - NEON networks"
+    if [[ "$REMOVE_ALL" == true ]]; then
+        echo -e "  ${RED}- All base images (postgres, redis, minio, livekit)${NC}"
+    fi
     echo ""
     read -p "Are you sure you want to continue? (y/N): " confirm
     if [[ "$confirm" != "y" ]] && [[ "$confirm" != "Y" ]]; then
@@ -58,115 +71,195 @@ print_warning() {
     echo -e "${YELLOW}[!]${NC} $1"
 }
 
-print_error() {
-    echo -e "${RED}[✗]${NC} $1"
+print_info() {
+    echo -e "${BLUE}[i]${NC} $1"
 }
 
-# Step 1: Stop and remove containers using docker-compose
-echo "Stopping containers..."
+# =============================================================================
+# Step 1: Stop containers using docker-compose (try both v1 and v2)
+# =============================================================================
+echo -e "${BLUE}Step 1: Stopping containers via docker-compose...${NC}"
 cd "$DOCKER_DIR"
-docker compose down --remove-orphans 2>/dev/null || true
-print_status "Containers stopped"
 
-# Step 2: Remove NEON containers (in case any are orphaned)
-echo ""
-echo "Removing NEON containers..."
-NEON_CONTAINERS=$(docker ps -a --filter "name=neon-" --format "{{.Names}}" 2>/dev/null || true)
-if [[ -n "$NEON_CONTAINERS" ]]; then
-    echo "$NEON_CONTAINERS" | xargs -r docker rm -f 2>/dev/null || true
-    print_status "Removed containers: $NEON_CONTAINERS"
-else
-    print_status "No NEON containers found"
-fi
+# Try docker compose v2 first, then v1
+docker compose down --remove-orphans --volumes 2>/dev/null || \
+docker-compose down --remove-orphans --volumes 2>/dev/null || true
+print_status "Docker compose down completed"
 
-# Step 3: Remove NEON volumes
+# =============================================================================
+# Step 2: Force remove ALL project containers (multiple naming patterns)
+# =============================================================================
 echo ""
-echo "Removing NEON volumes..."
-VOLUME_PREFIX="docker_"  # docker-compose prefixes volumes with directory name
-VOLUMES_TO_REMOVE=(
-    "${VOLUME_PREFIX}postgres_data"
-    "${VOLUME_PREFIX}redis_data"
-    "${VOLUME_PREFIX}minio_data"
-    "${VOLUME_PREFIX}garage_data"
-    "${VOLUME_PREFIX}garage_meta"
-    "${VOLUME_PREFIX}egress_tmp"
+echo -e "${BLUE}Step 2: Removing all project containers...${NC}"
+
+# Container name patterns used by docker-compose
+CONTAINER_PATTERNS=(
+    "neon-"
+    "docker_"
+    "docker-"
+    "neon_"
 )
 
-for vol in "${VOLUMES_TO_REMOVE[@]}"; do
-    if docker volume inspect "$vol" >/dev/null 2>&1; then
-        docker volume rm "$vol" 2>/dev/null || print_warning "Could not remove volume: $vol"
-        print_status "Removed volume: $vol"
+for pattern in "${CONTAINER_PATTERNS[@]}"; do
+    CONTAINERS=$(docker ps -a --filter "name=${pattern}" --format "{{.Names}}" 2>/dev/null || true)
+    if [[ -n "$CONTAINERS" ]]; then
+        echo "$CONTAINERS" | while read -r container; do
+            docker rm -f "$container" 2>/dev/null && print_status "Removed container: $container" || true
+        done
     fi
 done
 
-# Also try without prefix (in case compose project name differs)
-VOLUMES_NO_PREFIX=(
-    "postgres_data"
-    "redis_data"
-    "minio_data"
-    "garage_data"
-    "garage_meta"
-    "egress_tmp"
+# Also remove by specific container names
+SPECIFIC_CONTAINERS=(
+    "neon-postgres"
+    "neon-redis"
+    "neon-minio"
+    "neon-garage"
+    "neon-livekit"
+    "neon-livekit-egress"
+    "neon-mailpit"
+    "neon-api"
+    "neon-web"
 )
 
-for vol in "${VOLUMES_NO_PREFIX[@]}"; do
-    if docker volume inspect "$vol" >/dev/null 2>&1; then
-        docker volume rm "$vol" 2>/dev/null || print_warning "Could not remove volume: $vol"
-        print_status "Removed volume: $vol"
+for container in "${SPECIFIC_CONTAINERS[@]}"; do
+    if docker ps -a --format "{{.Names}}" | grep -q "^${container}$"; then
+        docker rm -f "$container" 2>/dev/null && print_status "Removed container: $container" || true
     fi
 done
 
-# Step 4: Remove NEON images
+print_status "Container cleanup completed"
+
+# =============================================================================
+# Step 3: Remove ALL project volumes (multiple naming patterns)
+# =============================================================================
 echo ""
-echo "Removing NEON images..."
-NEON_IMAGES=$(docker images --filter "reference=*neon*" --format "{{.Repository}}:{{.Tag}}" 2>/dev/null || true)
-if [[ -n "$NEON_IMAGES" ]]; then
-    echo "$NEON_IMAGES" | xargs -r docker rmi -f 2>/dev/null || true
-    print_status "Removed NEON images"
-else
-    print_status "No NEON images found"
-fi
+echo -e "${BLUE}Step 3: Removing all project volumes...${NC}"
 
-# Also remove docker-api and docker-web images (built by docker-compose)
-COMPOSE_IMAGES=$(docker images --filter "reference=docker-api*" --filter "reference=docker-web*" --format "{{.Repository}}:{{.Tag}}" 2>/dev/null || true)
-if [[ -n "$COMPOSE_IMAGES" ]]; then
-    echo "$COMPOSE_IMAGES" | xargs -r docker rmi -f 2>/dev/null || true
-    print_status "Removed compose-built images"
-fi
+# Get all volumes and filter by known patterns
+ALL_VOLUMES=$(docker volume ls -q 2>/dev/null || true)
 
-# Step 5: Remove NEON network
+# Volume name patterns
+VOLUME_KEYWORDS=(
+    "postgres"
+    "redis"
+    "minio"
+    "garage"
+    "egress"
+    "neon"
+)
+
+for vol in $ALL_VOLUMES; do
+    for keyword in "${VOLUME_KEYWORDS[@]}"; do
+        if [[ "$vol" == *"$keyword"* ]]; then
+            docker volume rm -f "$vol" 2>/dev/null && print_status "Removed volume: $vol" || print_warning "Could not remove: $vol"
+            break
+        fi
+    done
+done
+
+print_status "Volume cleanup completed"
+
+# =============================================================================
+# Step 4: Remove project images
+# =============================================================================
 echo ""
-echo "Removing NEON network..."
-if docker network inspect neon-network >/dev/null 2>&1; then
-    docker network rm neon-network 2>/dev/null || print_warning "Could not remove network"
-    print_status "Removed neon-network"
-else
-    print_status "Network neon-network not found"
+echo -e "${BLUE}Step 4: Removing project images...${NC}"
+
+# Remove built images (various naming patterns)
+IMAGE_PATTERNS=(
+    "*neon*"
+    "docker-api*"
+    "docker-web*"
+    "docker_api*"
+    "docker_web*"
+)
+
+for pattern in "${IMAGE_PATTERNS[@]}"; do
+    IMAGES=$(docker images --filter "reference=${pattern}" --format "{{.Repository}}:{{.Tag}}" 2>/dev/null || true)
+    if [[ -n "$IMAGES" ]]; then
+        echo "$IMAGES" | while read -r image; do
+            docker rmi -f "$image" 2>/dev/null && print_status "Removed image: $image" || true
+        done
+    fi
+done
+
+# Remove base images if --all flag is set
+if [[ "$REMOVE_ALL" == true ]]; then
+    echo ""
+    print_info "Removing base images (--all flag)..."
+    BASE_IMAGES=(
+        "postgres:16-alpine"
+        "redis:7-alpine"
+        "minio/minio:latest"
+        "dxflrs/garage:v0.9.3"
+        "livekit/livekit-server:v1.5"
+        "livekit/egress:v1.8"
+        "axllent/mailpit:latest"
+    )
+
+    for image in "${BASE_IMAGES[@]}"; do
+        if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "^${image}$"; then
+            docker rmi -f "$image" 2>/dev/null && print_status "Removed base image: $image" || true
+        fi
+    done
 fi
 
-# Also try with docker_ prefix
-if docker network inspect docker_neon-network >/dev/null 2>&1; then
-    docker network rm docker_neon-network 2>/dev/null || print_warning "Could not remove network"
-    print_status "Removed docker_neon-network"
-fi
+print_status "Image cleanup completed"
 
+# =============================================================================
+# Step 5: Remove project networks
+# =============================================================================
+echo ""
+echo -e "${BLUE}Step 5: Removing project networks...${NC}"
+
+NETWORK_PATTERNS=(
+    "neon"
+    "docker_neon"
+    "docker_default"
+)
+
+for pattern in "${NETWORK_PATTERNS[@]}"; do
+    NETWORKS=$(docker network ls --filter "name=${pattern}" --format "{{.Name}}" 2>/dev/null || true)
+    if [[ -n "$NETWORKS" ]]; then
+        echo "$NETWORKS" | while read -r network; do
+            # Don't remove default bridge networks
+            if [[ "$network" != "bridge" && "$network" != "host" && "$network" != "none" ]]; then
+                docker network rm "$network" 2>/dev/null && print_status "Removed network: $network" || true
+            fi
+        done
+    fi
+done
+
+print_status "Network cleanup completed"
+
+# =============================================================================
 # Step 6: Prune dangling resources
+# =============================================================================
 echo ""
-echo "Pruning dangling resources..."
+echo -e "${BLUE}Step 6: Pruning dangling resources...${NC}"
 docker system prune -f 2>/dev/null || true
-print_status "Pruned dangling resources"
+print_status "Dangling resources pruned"
 
-# Step 7: Remove build cache (optional but helps with stale builds)
+# =============================================================================
+# Step 7: Clear build cache
+# =============================================================================
 echo ""
-echo "Removing build cache..."
-docker builder prune -f 2>/dev/null || true
+echo -e "${BLUE}Step 7: Clearing build cache...${NC}"
+docker builder prune -af 2>/dev/null || true
 print_status "Build cache cleared"
 
+# =============================================================================
+# Summary
+# =============================================================================
 echo ""
 echo -e "${GREEN}==============================================================================${NC}"
 echo -e "${GREEN}Cleanup complete!${NC}"
 echo -e "${GREEN}==============================================================================${NC}"
 echo ""
 echo "To rebuild the NEON platform, run:"
+echo "  cd docker && docker-compose up -d"
+echo ""
+echo "Or with docker compose v2:"
 echo "  cd docker && docker compose up -d"
 echo ""
