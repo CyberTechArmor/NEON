@@ -480,6 +480,8 @@ echo ""
 
 prompt_yes_no "Use built-in reverse proxy with auto SSL?" "y" USE_BUILTIN_PROXY
 
+BIND_ADDRESS="127.0.0.1"
+
 if [ "$USE_BUILTIN_PROXY" = "false" ]; then
     echo ""
     print_info "You'll need to configure your own reverse proxy."
@@ -506,6 +508,25 @@ if [ "$USE_BUILTIN_PROXY" = "false" ]; then
 
     if [ "$PROXY_TYPE" != "manual" ]; then
         print_success "Will generate $PROXY_TYPE configuration."
+    fi
+
+    echo ""
+    print_info "By default, services bind to 127.0.0.1 (localhost only)."
+    print_info "If your reverse proxy is on a different machine, you may need to bind to 0.0.0.0 or a specific IP."
+    echo ""
+    prompt_yes_no "Bind services to a different IP address?" "n" CUSTOM_BIND
+
+    if [ "$CUSTOM_BIND" = "true" ]; then
+        echo ""
+        echo "  Common options:"
+        echo "    127.0.0.1  - Localhost only (most secure, same machine)"
+        echo "    0.0.0.0    - All interfaces (required for external proxy)"
+        echo "    <IP>       - Specific interface IP"
+        echo ""
+        prompt "Enter bind address" "0.0.0.0" BIND_ADDRESS
+        print_success "Services will bind to: $BIND_ADDRESS"
+    else
+        print_info "Services will bind to: $BIND_ADDRESS (localhost)"
     fi
 fi
 
@@ -963,7 +984,7 @@ EOF
 else
     # Generate Docker Compose without proxy
     print_info "Creating Docker Compose without built-in proxy..."
-    cat > "$PROJECT_ROOT/docker/docker-compose.yml" << 'EOF'
+    cat > "$PROJECT_ROOT/docker/docker-compose.yml" << EOF
 version: '3.8'
 
 services:
@@ -972,13 +993,13 @@ services:
     image: postgres:15-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: \${POSTGRES_USER}
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
+      POSTGRES_DB: \${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U \${POSTGRES_USER} -d \${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -989,11 +1010,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    command: redis-server --requirepass \${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "\${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -1008,8 +1029,8 @@ services:
     volumes:
       - ./configs/livekit.yaml:/etc/livekit.yaml:ro
     ports:
-      - "7880:7880"
-      - "7881:7881"
+      - "${BIND_ADDRESS}:7880:7880"
+      - "${BIND_ADDRESS}:7881:7881"
       - "50000-50100:50000-50100/udp"
     depends_on:
       redis:
@@ -1036,7 +1057,7 @@ services:
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "${BIND_ADDRESS}:3001:3001"
     env_file:
       - ../apps/api/.env
     depends_on:
@@ -1056,7 +1077,7 @@ services:
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "${BIND_ADDRESS}:3000:80"
     env_file:
       - ../apps/web/.env
     networks:
@@ -1073,6 +1094,7 @@ networks:
     driver: bridge
 EOF
     print_success "Docker Compose file created."
+    print_info "Services will bind to: ${BIND_ADDRESS}"
 fi
 
 # Generate reverse proxy configs if needed
@@ -1153,9 +1175,9 @@ if [ "$USE_BUILTIN_PROXY" = "false" ] && [ "$PROXY_TYPE" != "manual" ]; then
     esac
     echo ""
     echo -e "  ${CYAN}Service ports (for your proxy to connect to):${NC}"
-    echo "    - API:      localhost:3001"
-    echo "    - Web:      localhost:3000"
-    echo "    - LiveKit:  localhost:7880"
+    echo "    - API:      ${BIND_ADDRESS}:3001"
+    echo "    - Web:      ${BIND_ADDRESS}:3000"
+    echo "    - LiveKit:  ${BIND_ADDRESS}:7880"
     echo ""
 fi
 
