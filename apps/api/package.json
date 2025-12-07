@@ -12,7 +12,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:generate": "prisma generate --schema=../packages/database/prisma/schema.prisma",
+    "db:migrate": "prisma migrate deploy --schema=../packages/database/prisma/schema.prisma",
+    "db:seed": "node -e \"require('./dist/scripts/seed.js')\""
   },
   "dependencies": {
     "@neon/config": "*",
