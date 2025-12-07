@@ -43,21 +43,45 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// Types for admin dashboard
+interface AdminStats {
+  users?: number;
+  messagesToday?: number;
+  activeMeetings?: number;
+  onlineUsers?: number;
+  storage?: {
+    storageUsed?: number;
+    storageLimit?: number;
+  };
+}
+
+interface HealthStatus {
+  healthy?: boolean;
+}
+
+interface AdminHealth {
+  database?: HealthStatus;
+  redis?: HealthStatus;
+  storage?: HealthStatus;
+  livekit?: HealthStatus;
+  jobs?: Record<string, { running?: boolean; description?: string; schedule?: string; lastRun?: string }>;
+}
+
 // Dashboard overview component
 function AdminDashboard() {
-  const { data: stats, isLoading: isLoadingStats } = useQuery({
+  const { data: stats, isLoading: isLoadingStats } = useQuery<AdminStats>({
     queryKey: ['admin', 'stats'],
     queryFn: async () => {
       const response = await adminApi.getStats();
-      return response.data.data;
+      return response.data.data as AdminStats;
     },
   });
 
-  const { data: health, isLoading: isLoadingHealth, refetch: refetchHealth } = useQuery({
+  const { data: health, isLoading: isLoadingHealth, refetch: refetchHealth } = useQuery<AdminHealth>({
     queryKey: ['admin', 'health'],
     queryFn: async () => {
       const response = await adminApi.getHealth();
-      return response.data.data;
+      return response.data.data as AdminHealth;
     },
     refetchInterval: 30000,
   });

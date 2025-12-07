@@ -34,6 +34,14 @@ import {
 import { meetingsApi, getErrorMessage } from '../lib/api';
 import '@livekit/components-styles';
 
+// Meeting type
+interface Meeting {
+  id: string;
+  title: string;
+  scheduledStart?: string;
+  isRecording?: boolean;
+}
+
 // Participant list panel
 function ParticipantList({ onClose }: { onClose: () => void }) {
   const participants = useParticipants();
@@ -360,12 +368,12 @@ export default function MeetingPage() {
   const [showChat, setShowChat] = useState(false);
 
   // Fetch meeting details
-  const { data: meeting, isLoading: isLoadingMeeting } = useQuery({
+  const { data: meeting, isLoading: isLoadingMeeting } = useQuery<Meeting>({
     queryKey: ['meeting', meetingId],
     queryFn: async () => {
       if (!meetingId) throw new Error('No meeting ID');
       const response = await meetingsApi.get(meetingId);
-      return response.data.data;
+      return response.data.data as Meeting;
     },
     enabled: !!meetingId,
   });
