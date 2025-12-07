@@ -141,23 +141,26 @@ install_docker() {
     detect_os
 
     case "$OS" in
-        ubuntu|debian|pop)
+        ubuntu|debian|pop|linuxmint)
             echo "  Detected: $OS"
             echo "  Installing Docker via official script..."
             echo ""
 
             # Install prerequisites
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq ca-certificates curl gnupg lsb-release
+            sudo apt-get update
+            sudo apt-get install -y ca-certificates curl gnupg
 
             # Use Docker's convenience script
             curl -fsSL https://get.docker.com | sudo sh
+
+            # Start and enable Docker service
+            sudo systemctl start docker
+            sudo systemctl enable docker
 
             # Add current user to docker group
             sudo usermod -aG docker "$USER"
 
             print_success "Docker installed successfully."
-            print_warning "You may need to log out and back in for group changes to take effect."
             ;;
 
         fedora|rhel|centos|rocky|alma)
@@ -176,15 +179,27 @@ install_docker() {
             sudo usermod -aG docker "$USER"
 
             print_success "Docker installed successfully."
-            print_warning "You may need to log out and back in for group changes to take effect."
             ;;
 
-        arch|manjaro)
+        arch|manjaro|endeavouros)
             echo "  Detected: $OS"
             echo "  Installing Docker via pacman..."
             echo ""
 
             sudo pacman -Sy --noconfirm docker docker-compose
+            sudo systemctl start docker
+            sudo systemctl enable docker
+            sudo usermod -aG docker "$USER"
+
+            print_success "Docker installed successfully."
+            ;;
+
+        opensuse*|sles)
+            echo "  Detected: $OS"
+            echo "  Installing Docker via zypper..."
+            echo ""
+
+            sudo zypper install -y docker docker-compose
             sudo systemctl start docker
             sudo systemctl enable docker
             sudo usermod -aG docker "$USER"
@@ -207,21 +222,35 @@ install_docker() {
             echo ""
             echo "Please install Docker manually:"
             echo "  https://docs.docker.com/get-docker/"
+            echo ""
+            echo "  After installing, run this script again."
             exit 1
             ;;
     esac
+
+    # Refresh shell's command hash table
+    hash -r 2>/dev/null || true
+}
+
+check_docker_compose() {
+    # Check for docker compose (v2) or docker-compose (v1)
+    if docker compose version &>/dev/null 2>&1; then
+        return 0
+    elif command -v docker-compose &>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 check_dependencies() {
     local docker_missing=false
     local compose_missing=false
+    local docker_installed=false
 
-    if ! command -v docker &> /dev/null; then
+    # Check if docker command exists
+    if ! command -v docker &>/dev/null; then
         docker_missing=true
-    fi
-
-    if ! command -v docker compose &> /dev/null && ! command -v docker-compose &> /dev/null; then
-        compose_missing=true
     fi
 
     if [ "$docker_missing" = true ]; then
@@ -231,22 +260,70 @@ check_dependencies() {
 
         if [ "$INSTALL_DOCKER" = true ]; then
             install_docker
+            docker_installed=true
 
-            # Verify installation
-            if ! command -v docker &> /dev/null; then
-                print_error "Docker installation failed. Please install manually."
+            # Refresh path
+            hash -r 2>/dev/null || true
+            export PATH="/usr/bin:/usr/local/bin:$PATH"
+
+            # Verify docker binary exists
+            if ! command -v docker &>/dev/null; then
+                print_error "Docker installation failed - docker command not found."
+                echo ""
+                echo "Please install Docker manually: https://docs.docker.com/get-docker/"
                 exit 1
             fi
 
-            # Check if we need to use sudo for docker or newgrp
-            if ! docker ps &>/dev/null; then
-                print_warning "Docker installed but requires logout/login for permissions."
+            print_success "Docker command found."
+
+            # Check if docker daemon is running
+            echo ""
+            print_info "Checking Docker service..."
+
+            if ! sudo docker info &>/dev/null; then
+                print_warning "Docker daemon not responding. Starting Docker service..."
+                sudo systemctl start docker || true
+                sleep 3
+            fi
+
+            # Verify docker is working (using sudo since user might not have group perms yet)
+            if sudo docker ps &>/dev/null; then
+                print_success "Docker is running."
+            else
+                print_error "Docker service is not running properly."
                 echo ""
-                echo "  Options:"
-                echo "    1. Log out and back in, then run this script again"
-                echo "    2. Run: newgrp docker && ./scripts/setup.sh"
+                echo "Try manually:"
+                echo "  sudo systemctl start docker"
+                echo "  sudo systemctl status docker"
+                exit 1
+            fi
+
+            # Check if current user can run docker without sudo
+            if ! docker ps &>/dev/null 2>&1; then
+                print_warning "Docker requires sudo or group membership."
                 echo ""
-                exit 0
+                echo "Your user has been added to the 'docker' group."
+                echo "To apply this change, you have two options:"
+                echo ""
+                echo "  Option 1: Log out and back in, then run:"
+                echo "            ./scripts/setup.sh"
+                echo ""
+                echo "  Option 2: Run this command now:"
+                echo "            newgrp docker"
+                echo "            ./scripts/setup.sh"
+                echo ""
+                prompt_yes_no "Continue with sudo for now? (not recommended for production)" "n" USE_SUDO_DOCKER
+
+                if [ "$USE_SUDO_DOCKER" = true ]; then
+                    DOCKER_CMD="sudo docker"
+                    DOCKER_COMPOSE_CMD="sudo docker compose"
+                    print_warning "Using sudo for Docker commands."
+                else
+                    exit 0
+                fi
+            else
+                DOCKER_CMD="docker"
+                print_success "Docker is accessible without sudo."
             fi
         else
             print_error "Docker is required to run NEON."
@@ -254,17 +331,69 @@ check_dependencies() {
             echo "Install Docker manually: https://docs.docker.com/get-docker/"
             exit 1
         fi
+    else
+        # Docker exists, check if it's running
+        if ! docker info &>/dev/null 2>&1; then
+            if ! sudo docker info &>/dev/null 2>&1; then
+                print_warning "Docker is installed but not running."
+                echo ""
+                print_info "Starting Docker service..."
+                sudo systemctl start docker || true
+                sleep 2
+
+                if ! sudo docker info &>/dev/null; then
+                    print_error "Failed to start Docker service."
+                    echo "Try: sudo systemctl start docker"
+                    exit 1
+                fi
+            fi
+
+            # Docker running but user needs sudo
+            if ! docker ps &>/dev/null 2>&1; then
+                print_warning "Docker requires sudo. Add your user to the docker group:"
+                echo "  sudo usermod -aG docker \$USER"
+                echo "  Then log out and back in."
+                echo ""
+                prompt_yes_no "Continue with sudo for now?" "y" USE_SUDO_DOCKER
+
+                if [ "$USE_SUDO_DOCKER" = true ]; then
+                    DOCKER_CMD="sudo docker"
+                    DOCKER_COMPOSE_CMD="sudo docker compose"
+                else
+                    exit 0
+                fi
+            else
+                DOCKER_CMD="docker"
+            fi
+        else
+            DOCKER_CMD="docker"
+            print_success "Docker is installed and running."
+        fi
     fi
 
-    # Re-check compose after potential Docker installation
-    if ! command -v docker compose &> /dev/null && ! command -v docker-compose &> /dev/null; then
-        print_error "Docker Compose is not available."
-        echo ""
-        echo "Docker Compose should be included with Docker. Try:"
-        echo "  - Updating Docker to the latest version"
-        echo "  - Or install docker-compose-plugin: sudo apt install docker-compose-plugin"
-        exit 1
+    # Check for Docker Compose
+    if [ -z "$DOCKER_COMPOSE_CMD" ]; then
+        if docker compose version &>/dev/null 2>&1; then
+            DOCKER_COMPOSE_CMD="docker compose"
+        elif sudo docker compose version &>/dev/null 2>&1; then
+            DOCKER_COMPOSE_CMD="sudo docker compose"
+        elif command -v docker-compose &>/dev/null; then
+            DOCKER_COMPOSE_CMD="docker-compose"
+        else
+            print_error "Docker Compose is not available."
+            echo ""
+            echo "Docker Compose should be included with Docker. Try:"
+            echo "  - Update Docker: sudo apt-get update && sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+            echo "  - Or install separately: sudo apt-get install docker-compose-plugin"
+            exit 1
+        fi
     fi
+
+    print_success "Docker Compose is available."
+
+    # Export for use later in script
+    export DOCKER_CMD
+    export DOCKER_COMPOSE_CMD
 }
 
 # Total steps for progress indicator
@@ -282,10 +411,11 @@ echo ""
 print_info "Press Enter to accept default values shown in [green]."
 echo ""
 
-# Check dependencies
+# Check dependencies (will install Docker if missing)
 print_info "Checking dependencies..."
+echo ""
 check_dependencies
-print_success "All dependencies found."
+echo ""
 
 # Step 1: Domain Configuration
 print_step 1 "Domain Configuration"
@@ -1053,21 +1183,32 @@ print_info "Starting Docker containers..."
 
 cd "$PROJECT_ROOT/docker"
 
-# Check if docker compose or docker-compose should be used
-if command -v docker compose &> /dev/null; then
-    DOCKER_COMPOSE="docker compose"
-else
-    DOCKER_COMPOSE="docker-compose"
+# Use the DOCKER_COMPOSE_CMD set during dependency check
+# Fall back to detection if not set
+if [ -z "$DOCKER_COMPOSE_CMD" ]; then
+    if docker compose version &>/dev/null 2>&1; then
+        DOCKER_COMPOSE_CMD="docker compose"
+    elif sudo docker compose version &>/dev/null 2>&1; then
+        DOCKER_COMPOSE_CMD="sudo docker compose"
+    elif command -v docker-compose &>/dev/null; then
+        DOCKER_COMPOSE_CMD="docker-compose"
+    else
+        print_error "Docker Compose not found."
+        exit 1
+    fi
 fi
 
+print_info "Using: $DOCKER_COMPOSE_CMD"
+echo ""
+
 # Start services
-$DOCKER_COMPOSE up -d
+$DOCKER_COMPOSE_CMD up -d
 
 if [ $? -ne 0 ]; then
     print_error "Failed to start Docker containers."
     echo ""
     echo "Please check the error above and try running manually:"
-    echo -e "  ${CYAN}cd docker && docker compose up -d${NC}"
+    echo -e "  ${CYAN}cd docker && $DOCKER_COMPOSE_CMD up -d${NC}"
     exit 1
 fi
 
@@ -1081,7 +1222,7 @@ echo ""
 # Wait for PostgreSQL
 echo -n "  Waiting for PostgreSQL..."
 for i in {1..30}; do
-    if $DOCKER_COMPOSE exec -T postgres pg_isready -U neon -d neon &>/dev/null; then
+    if $DOCKER_COMPOSE_CMD exec -T postgres pg_isready -U neon -d neon &>/dev/null; then
         echo -e " ${GREEN}ready${NC}"
         break
     fi
@@ -1094,7 +1235,7 @@ done
 # Wait for Redis
 echo -n "  Waiting for Redis..."
 for i in {1..30}; do
-    if $DOCKER_COMPOSE exec -T redis redis-cli -a "$REDIS_PASSWORD" ping &>/dev/null; then
+    if $DOCKER_COMPOSE_CMD exec -T redis redis-cli -a "$REDIS_PASSWORD" ping &>/dev/null; then
         echo -e " ${GREEN}ready${NC}"
         break
     fi
@@ -1107,7 +1248,7 @@ done
 # Wait for API to be built and running
 echo -n "  Waiting for API..."
 for i in {1..60}; do
-    if $DOCKER_COMPOSE exec -T api wget -q --spider http://localhost:3001/api/health 2>/dev/null; then
+    if $DOCKER_COMPOSE_CMD exec -T api wget -q --spider http://localhost:3001/api/health 2>/dev/null; then
         echo -e " ${GREEN}ready${NC}"
         break
     fi
@@ -1124,7 +1265,7 @@ print_info "Initializing database..."
 echo ""
 
 echo "  Running migrations..."
-if $DOCKER_COMPOSE exec -T api npm run db:migrate 2>&1 | grep -v "^>" | head -20; then
+if $DOCKER_COMPOSE_CMD exec -T api npm run db:migrate 2>&1 | grep -v "^>" | head -20; then
     print_success "Database migrations complete."
 else
     print_warning "Migration may have had issues. Check logs if needed."
@@ -1132,7 +1273,7 @@ fi
 
 echo ""
 echo "  Seeding initial data..."
-if $DOCKER_COMPOSE exec -T api npm run db:seed 2>&1 | grep -v "^>" | head -20; then
+if $DOCKER_COMPOSE_CMD exec -T api npm run db:seed 2>&1 | grep -v "^>" | head -20; then
     print_success "Database seeding complete."
 else
     print_warning "Seeding may have had issues. Check logs if needed."
