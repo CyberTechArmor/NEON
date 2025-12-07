@@ -241,8 +241,7 @@ model Role {
   // Permission rules
   permissionsAsSource RolePermission[] @relation("SourceRole")
   permissionsAsTarget RolePermission[] @relation("TargetRole")
-  userRolePermissionsAsSource UserRolePermission[] @relation("SourceRole")
-  userRolePermissionsAsTarget UserRolePermission[] @relation("TargetRole")
+  userRolePermissions UserRolePermission[]
 
   @@unique([departmentId, name])
   @@index([orgId])
@@ -353,8 +352,7 @@ model UserRolePermission {
   updatedAt       DateTime            @updatedAt
 
   user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sourceRole      Role                @relation("SourceRole", fields: [roleId], references: [id], onDelete: Cascade)
-  targetRole      Role                @relation("TargetRole", fields: [roleId], references: [id], onDelete: Cascade)
+  role            Role                @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@unique([userId, roleId, userIsSource])
   @@schema("public")
