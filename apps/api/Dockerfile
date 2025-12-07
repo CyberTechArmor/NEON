@@ -16,8 +16,8 @@ COPY packages/database/package*.json ./packages/database/
 COPY packages/shared/package*.json ./packages/shared/
 COPY packages/config/package*.json ./packages/config/
 
-# Install dependencies
-RUN npm ci --workspace=@neon/api --include-workspace-root
+# Install dependencies (use npm install since package-lock.json may not exist)
+RUN npm install --workspace=@neon/api --include-workspace-root
 
 # Copy source files
 COPY apps/api ./apps/api
@@ -46,7 +46,7 @@ COPY apps/api/package*.json ./apps/api/
 COPY packages/database/package*.json ./packages/database/
 COPY packages/shared/package*.json ./packages/shared/
 
-RUN npm ci --workspace=@neon/api --include-workspace-root --omit=dev
+RUN npm install --workspace=@neon/api --include-workspace-root --omit=dev
 
 # Copy built files
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
