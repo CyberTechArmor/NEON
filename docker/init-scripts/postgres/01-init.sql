@@ -20,8 +20,9 @@ GRANT ALL PRIVILEGES ON SCHEMA federation TO neon;
 
 -- Create audit log table (append-only, hash-chained)
 -- This is created here rather than in Prisma to ensure it exists from the start
+-- Note: PRIMARY KEY must include partition_key for partitioned tables
 CREATE TABLE IF NOT EXISTS audit.logs (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     org_id UUID,
     actor_id UUID,
@@ -37,7 +38,9 @@ CREATE TABLE IF NOT EXISTS audit.logs (
     previous_hash VARCHAR(64),
     entry_hash VARCHAR(64) NOT NULL,
     -- Partition key for efficient retention management
-    partition_key DATE NOT NULL DEFAULT CURRENT_DATE
+    partition_key DATE NOT NULL DEFAULT CURRENT_DATE,
+    -- Primary key must include partition column for partitioned tables
+    PRIMARY KEY (id, partition_key)
 ) PARTITION BY RANGE (partition_key);
 
 -- Create initial partition (current year)

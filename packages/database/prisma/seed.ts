@@ -31,9 +31,9 @@ async function main() {
   }
 
   // Get environment variables for admin setup
-  const adminEmail = process.env.ADMIN_EMAIL || 'admin@neon.local';
-  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123!';
-  const adminUsername = process.env.ADMIN_USERNAME || 'admin';
+  const adminEmail = process.env.ADMIN_EMAIL || 'thomas@tagarmor.com';
+  const adminPassword = process.env.ADMIN_PASSWORD || 'd9zuzaZ9b2BMjm6x';
+  const adminUsername = process.env.ADMIN_USERNAME || 'thomas';
   const orgName = process.env.ORG_NAME || 'NEON Organization';
 
   // Create organization

@@ -44,6 +44,16 @@ else
   fi
 fi
 
+# Run seed if SEED_DATABASE is set and seed file exists
+if [ "$SEED_DATABASE" = "true" ] && [ -f "/app/packages/database/prisma/seed.js" ]; then
+  echo "[Entrypoint] Running database seed..."
+  if node /app/packages/database/prisma/seed.js; then
+    echo "[Entrypoint] Database seed completed successfully"
+  else
+    echo "[Entrypoint] Warning: Database seed failed (may already be seeded)"
+  fi
+fi
+
 # Return to app directory and start the server
 cd /app
 echo "[Entrypoint] Starting API server..."

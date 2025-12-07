@@ -16,6 +16,9 @@ import MeetingPage from './pages/MeetingPage';
 import SettingsPage from './pages/SettingsPage';
 import AdminPage from './pages/AdminPage';
 
+// System Pages
+import InitializingPage from './pages/InitializingPage';
+
 // Protected Route Wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuthStore();
@@ -59,6 +62,24 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const { initStatus, isCheckingInit } = useAuthStore();
+
+  // Show loading while checking initialization
+  if (isCheckingInit) {
+    return (
+      <div className="min-h-screen bg-neon-bg flex items-center justify-center">
+        <div className="animate-pulse">
+          <div className="text-2xl font-bold tracking-tight">NEON</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show initialization page if system is not initialized
+  if (initStatus && !initStatus.initialized) {
+    return <InitializingPage />;
+  }
+
   return (
     <Routes>
       {/* Auth Routes */}
