@@ -3,6 +3,20 @@ import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from './auth';
 import { useChatStore } from './chat';
 
+// Get WebSocket URL from runtime config (docker), build-time env, or fallback
+const getWsUrl = (): string => {
+  // Runtime config from docker-entrypoint.sh
+  if (typeof window !== 'undefined' && (window as any).__NEON_CONFIG__?.wsUrl) {
+    return (window as any).__NEON_CONFIG__.wsUrl;
+  }
+  // Build-time environment variable
+  if (import.meta.env.VITE_WS_URL) {
+    return import.meta.env.VITE_WS_URL;
+  }
+  // Fallback for local development
+  return 'http://localhost:3001';
+};
+
 interface PresenceUser {
   odId: string;
   status: 'online' | 'away' | 'busy' | 'offline';
@@ -39,7 +53,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     const { accessToken } = useAuthStore.getState();
     if (!accessToken || get().socket) return;
 
-    const socket = io(import.meta.env.VITE_WS_URL || 'http://localhost:3000', {
+    const socket = io(getWsUrl(), {
       auth: { token: accessToken },
       transports: ['websocket'],
       reconnection: true,

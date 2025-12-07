@@ -1,8 +1,22 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../stores/auth';
 
+// Get API URL from runtime config (docker), build-time env, or fallback
+const getApiUrl = (): string => {
+  // Runtime config from docker-entrypoint.sh
+  if (typeof window !== 'undefined' && (window as any).__NEON_CONFIG__?.apiUrl) {
+    return (window as any).__NEON_CONFIG__.apiUrl;
+  }
+  // Build-time environment variable
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  // Fallback for local development
+  return 'http://localhost:3001/api';
+};
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3000/api',
+  baseURL: getApiUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
