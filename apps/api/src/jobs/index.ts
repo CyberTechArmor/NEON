@@ -10,6 +10,34 @@ import { AuditService } from '../services/audit';
 
 const config = getConfig();
 
+/**
+ * Check if an error is a Prisma "table does not exist" error
+ */
+function isTableNotExistError(error: unknown): boolean {
+  if (error && typeof error === 'object' && 'code' in error) {
+    // Prisma error code P2021 = table does not exist
+    return (error as { code: string }).code === 'P2021';
+  }
+  return false;
+}
+
+/**
+ * Wrap a job handler with graceful error handling for missing tables
+ */
+function withTableCheck<T>(handler: () => Promise<T>): () => Promise<T | undefined> {
+  return async () => {
+    try {
+      return await handler();
+    } catch (error) {
+      if (isTableNotExistError(error)) {
+        console.warn('[Jobs] Skipping job - database tables not yet created (run migrations)');
+        return undefined;
+      }
+      throw error;
+    }
+  };
+}
+
 interface ScheduledJob {
   name: string;
   schedule: string; // Cron format
@@ -97,10 +125,16 @@ async function runScheduler(): Promise<void> {
  * Start the job scheduler
  */
 export function startJobScheduler(): void {
+  // Check if jobs are enabled
+  if (!config.jobs.enabled) {
+    console.log('[Jobs] Scheduler disabled by configuration (JOBS_ENABLED=false)');
+    return;
+  }
+
   // Register built-in jobs
 
   // Session cleanup - every hour
-  registerJob('session-cleanup', '0 * * * *', async () => {
+  registerJob('session-cleanup', '0 * * * *', withTableCheck(async () => {
     const expiredDate = new Date();
     expiredDate.setDate(expiredDate.getDate() - 7);
 
@@ -114,10 +148,10 @@ export function startJobScheduler(): void {
     });
 
     console.log(`[Jobs] Cleaned up ${result.count} expired sessions`);
-  });
+  }));
 
   // Presence cleanup - every 5 minutes
-  registerJob('presence-cleanup', '*/5 * * * *', async () => {
+  registerJob('presence-cleanup', '*/5 * * * *', withTableCheck(async () => {
     const offlineThreshold = new Date();
     offlineThreshold.setMinutes(offlineThreshold.getMinutes() - 5);
 
@@ -128,7 +162,7 @@ export function startJobScheduler(): void {
       },
       data: { presenceStatus: 'OFFLINE' },
     });
-  });
+  }));
 
   // Backup job (configured schedule)
   if (config.jobs.backupSchedule) {
@@ -162,7 +196,7 @@ export function startJobScheduler(): void {
   }
 
   // Notification cleanup - daily at 4 AM
-  registerJob('notification-cleanup', '0 4 * * *', async () => {
+  registerJob('notification-cleanup', '0 4 * * *', withTableCheck(async () => {
     const oldDate = new Date();
     oldDate.setMonth(oldDate.getMonth() - 3);
 
@@ -174,10 +208,10 @@ export function startJobScheduler(): void {
     });
 
     console.log(`[Jobs] Cleaned up ${result.count} old notifications`);
-  });
+  }));
 
   // Meeting reminder job - every minute
-  registerJob('meeting-reminders', '* * * * *', async () => {
+  registerJob('meeting-reminders', '* * * * *', withTableCheck(async () => {
     const now = new Date();
 
     // Find meetings starting soon with pending reminders
@@ -235,7 +269,7 @@ export function startJobScheduler(): void {
         });
       }
     }
-  });
+  }));
 
   // Start scheduler loop (check every minute)
   schedulerInterval = setInterval(runScheduler, 60000);
