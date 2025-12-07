@@ -6,58 +6,67 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache python3 make g++
+# Install build dependencies and update npm
+RUN apk add --no-cache python3 make g++ && \
+    npm install -g npm@latest
 
-# Copy package files
+# Copy all package files first for better layer caching
 COPY package*.json ./
+COPY turbo.json ./
+COPY tsconfig.json ./
+
+# Copy workspace package.json files
 COPY apps/api/package*.json ./apps/api/
 COPY packages/database/package*.json ./packages/database/
 COPY packages/shared/package*.json ./packages/shared/
 COPY packages/config/package*.json ./packages/config/
 
-# Install dependencies (use npm install since package-lock.json may not exist)
-RUN npm install --workspace=@neon/api --include-workspace-root
+# Copy Prisma schema early (needed for postinstall)
+COPY packages/database/prisma ./packages/database/prisma
+
+# Install all dependencies
+RUN npm install
 
 # Copy source files
 COPY apps/api ./apps/api
 COPY packages ./packages
-COPY tsconfig.json ./
-COPY turbo.json ./
 
-# Generate Prisma client
-RUN npm run db:generate
+# Generate Prisma client directly (skip turbo for Docker builds)
+RUN npx prisma generate --schema=packages/database/prisma/schema.prisma
 
-# Build the API
-RUN npm run build --workspace=@neon/api
+# Build the API (skip turbo, build directly)
+RUN cd apps/api && npm run build
 
 # Production stage
 FROM node:20-alpine AS runner
 
 WORKDIR /app
 
+# Update npm in production image
+RUN npm install -g npm@latest
+
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 neon
 
-# Install production dependencies only
+# Copy package files
 COPY package*.json ./
 COPY apps/api/package*.json ./apps/api/
 COPY packages/database/package*.json ./packages/database/
 COPY packages/shared/package*.json ./packages/shared/
 
-RUN npm install --workspace=@neon/api --include-workspace-root --omit=dev
-
-# Copy built files
-COPY --from=builder /app/apps/api/dist ./apps/api/dist
-COPY --from=builder /app/packages/database ./packages/database
-COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
-
-# Copy Prisma schema and migrations
+# Copy Prisma schema
 COPY packages/database/prisma ./packages/database/prisma
+
+# Install production dependencies only
+RUN npm install --omit=dev
 
 # Generate Prisma client for production
 RUN npx prisma generate --schema=packages/database/prisma/schema.prisma
+
+# Copy built files from builder
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 
 # Switch to non-root user
 USER neon

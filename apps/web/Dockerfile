@@ -6,20 +6,25 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files
+# Update npm to latest version
+RUN npm install -g npm@latest
+
+# Copy all package files first for better layer caching
 COPY package*.json ./
+COPY turbo.json ./
+COPY tsconfig.json ./
+
+# Copy workspace package.json files
 COPY apps/web/package*.json ./apps/web/
 COPY packages/shared/package*.json ./packages/shared/
 COPY packages/config/package*.json ./packages/config/
 
-# Install dependencies (use npm install since package-lock.json may not exist)
-RUN npm install --workspace=@neon/web --include-workspace-root
+# Install all dependencies
+RUN npm install
 
 # Copy source files
 COPY apps/web ./apps/web
 COPY packages ./packages
-COPY tsconfig.json ./
-COPY turbo.json ./
 
 # Build arguments for environment variables
 ARG VITE_API_URL
@@ -33,8 +38,8 @@ ENV VITE_WS_URL=$VITE_WS_URL
 ENV VITE_LIVEKIT_URL=$VITE_LIVEKIT_URL
 ENV VITE_APP_NAME=$VITE_APP_NAME
 
-# Build the web client
-RUN npm run build --workspace=@neon/web
+# Build the web client (skip turbo, build directly)
+RUN cd apps/web && npm run build
 
 # Production stage - serve with nginx
 FROM nginx:alpine AS runner
