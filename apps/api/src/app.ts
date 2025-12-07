@@ -120,6 +120,15 @@ export function createApp(): Express {
     });
   });
 
+  // Also expose health at /api/health for consistency with proxy config
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      version: '0.1.0',
+    });
+  });
+
   app.get('/ready', async (_req: Request, res: Response) => {
     // TODO: Check database and Redis connectivity
     res.json({
@@ -173,8 +182,8 @@ export function createApp(): Express {
   // Webhooks (for LiveKit, etc.)
   apiRouter.use('/webhooks', webhooksRouter);
 
-  // Mount API router
-  app.use('/api/v1', apiRouter);
+  // Mount API router at /api (not /api/v1 to match frontend expectations)
+  app.use('/api', apiRouter);
 
   // ==========================================================================
   // 404 Handler
