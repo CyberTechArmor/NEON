@@ -113,11 +113,12 @@ router.post('/', async (req: Request, res: Response, next: NextFunction): Promis
       });
 
       if (existing) {
-        return res.json({
+        res.json({
           success: true,
           data: existing,
           meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
         });
+        return;
       }
     }
 
@@ -144,7 +145,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction): Promis
       },
     });
 
-    return res.status(201).json({
+    res.status(201).json({
       success: true,
       data: conversation,
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },

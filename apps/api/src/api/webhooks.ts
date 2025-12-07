@@ -21,7 +21,8 @@ router.post('/livekit', async (req: Request, res: Response, next: NextFunction):
 
     // Verify webhook signature
     if (!verifyWebhook(JSON.stringify(req.body), authHeader)) {
-      return res.status(401).json({ error: 'Invalid signature' });
+      res.status(401).json({ error: 'Invalid signature' });
+      return;
     }
 
     const event = req.body;
@@ -56,7 +57,7 @@ router.post('/livekit', async (req: Request, res: Response, next: NextFunction):
         console.log('[Webhook] Unhandled event:', event.event);
     }
 
-    return res.json({ received: true });
+    res.json({ received: true });
   } catch (error) {
     next(error);
   }
