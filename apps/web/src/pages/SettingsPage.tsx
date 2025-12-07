@@ -151,12 +151,14 @@ function SecuritySettings() {
       path: ['confirmPassword'],
     });
 
+  type PasswordFormData = z.infer<typeof passwordSchema>;
+
   const {
     register,
     handleSubmit,
     reset,
     formState: { errors },
-  } = useForm({
+  } = useForm<PasswordFormData>({
     resolver: zodResolver(passwordSchema),
   });
 
@@ -173,8 +175,8 @@ function SecuritySettings() {
     },
   });
 
-  const onSubmit = (data: { currentPassword: string; newPassword: string }) => {
-    changePasswordMutation.mutate(data);
+  const onSubmit = (data: PasswordFormData) => {
+    changePasswordMutation.mutate({ currentPassword: data.currentPassword, newPassword: data.newPassword });
   };
 
   return (

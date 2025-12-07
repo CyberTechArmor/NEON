@@ -624,6 +624,3 @@ export default function ChatPage() {
     </div>
   );
 }
-
-// Import for empty state
-import { MessageSquare } from 'lucide-react';

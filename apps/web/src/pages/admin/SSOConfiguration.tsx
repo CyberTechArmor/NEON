@@ -758,9 +758,10 @@ function SSOProviderModal({
                         type="radio"
                         value={type}
                         checked={selectedType === type}
-                        onChange={() => setSelectedType(type)}
                         className="hidden"
-                        {...register('type')}
+                        {...register('type', {
+                          onChange: () => setSelectedType(type)
+                        })}
                       />
                       <div className="flex items-center gap-3">
                         <Icon className="w-5 h-5" />
