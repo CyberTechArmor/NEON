@@ -19,6 +19,13 @@ interface User {
   settings: Record<string, unknown>;
 }
 
+interface InitStatus {
+  initialized: boolean;
+  hasUsers: boolean;
+  hasOrganization: boolean;
+  error?: string;
+}
+
 interface AuthState {
   user: User | null;
   accessToken: string | null;
@@ -28,6 +35,10 @@ interface AuthState {
   mfaPending: boolean;
   mfaUserId: string | null;
 
+  // System initialization status
+  initStatus: InitStatus | null;
+  isCheckingInit: boolean;
+
   // Actions
   login: (email: string, password: string) => Promise<{ requiresMfa: boolean }>;
   verifyMfa: (code: string) => Promise<void>;
@@ -36,6 +47,7 @@ interface AuthState {
   setUser: (user: User) => void;
   hasPermission: (permission: string) => boolean;
   initialize: () => Promise<void>;
+  checkInitialization: () => Promise<InitStatus>;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -48,6 +60,8 @@ export const useAuthStore = create<AuthState>()(
       isLoading: true,
       mfaPending: false,
       mfaUserId: null,
+      initStatus: null,
+      isCheckingInit: true,
 
       login: async (email: string, password: string) => {
         const response = await api.post('/auth/login', { email, password });
@@ -161,11 +175,34 @@ export const useAuthStore = create<AuthState>()(
       },
 
       initialize: async () => {
+        // First check if the system is initialized
+        await get().checkInitialization();
+
         const { refreshToken } = get();
         if (refreshToken) {
           await get().refreshSession();
         } else {
           set({ isLoading: false });
+        }
+      },
+
+      checkInitialization: async () => {
+        set({ isCheckingInit: true });
+        try {
+          const response = await api.get('/status/init');
+          const initStatus = response.data.data as InitStatus;
+          set({ initStatus, isCheckingInit: false });
+          return initStatus;
+        } catch {
+          // API not ready yet, assume not initialized
+          const initStatus: InitStatus = {
+            initialized: false,
+            hasUsers: false,
+            hasOrganization: false,
+            error: 'API not available',
+          };
+          set({ initStatus, isCheckingInit: false });
+          return initStatus;
         }
       },
     }),

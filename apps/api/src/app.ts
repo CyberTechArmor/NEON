@@ -11,6 +11,7 @@ import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { getConfig } from '@neon/config';
 import { AppError, ErrorCodes } from '@neon/shared';
+import { prisma } from '@neon/database';
 import { requestId } from './middleware/requestId';
 import { requestLogger } from './middleware/requestLogger';
 import { errorHandler } from './middleware/errorHandler';
@@ -135,6 +136,37 @@ export function createApp(): Express {
       status: 'ready',
       timestamp: new Date().toISOString(),
     });
+  });
+
+  // System initialization status (public, no auth required)
+  app.get('/api/status/init', async (_req: Request, res: Response) => {
+    try {
+      // Check if any users exist in the database
+      const userCount = await prisma.user.count();
+      const orgCount = await prisma.organization.count();
+
+      const isInitialized = userCount > 0 && orgCount > 0;
+
+      res.json({
+        success: true,
+        data: {
+          initialized: isInitialized,
+          hasUsers: userCount > 0,
+          hasOrganization: orgCount > 0,
+        },
+      });
+    } catch (error) {
+      // Database might not be ready yet
+      res.json({
+        success: true,
+        data: {
+          initialized: false,
+          hasUsers: false,
+          hasOrganization: false,
+          error: 'Database not ready',
+        },
+      });
+    }
   });
 
   // ==========================================================================
