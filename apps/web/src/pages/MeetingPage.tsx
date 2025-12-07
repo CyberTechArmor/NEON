@@ -464,7 +464,7 @@ export default function MeetingPage() {
             onToggleChat={() => setShowChat(!showChat)}
             showParticipants={showParticipants}
             showChat={showChat}
-            isRecording={meeting.isRecording}
+            isRecording={meeting?.isRecording ?? false}
           />
 
           {/* Side panels */}
