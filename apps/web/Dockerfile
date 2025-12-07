@@ -38,6 +38,13 @@ ENV VITE_WS_URL=$VITE_WS_URL
 ENV VITE_LIVEKIT_URL=$VITE_LIVEKIT_URL
 ENV VITE_APP_NAME=$VITE_APP_NAME
 
+# Build packages in correct dependency order
+# 1. Build @neon/config (no internal dependencies)
+RUN cd packages/config && npm run build
+
+# 2. Build @neon/shared (no internal dependencies)
+RUN cd packages/shared && npm run build
+
 # Build the web client (skip turbo, build directly)
 RUN cd apps/web && npm run build
 
