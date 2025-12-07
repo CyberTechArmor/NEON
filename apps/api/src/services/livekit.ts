@@ -156,12 +156,14 @@ export async function startRecording(
 
   const egress = getEgressService();
 
-  const info = await egress.startRoomCompositeEgress(roomName, {
-    file: {
-      filepath: outputPath,
-      disableManifest: true,
-    },
+  // LiveKit SDK v2 uses EncodedFileOutput for file recording
+  const { EncodedFileOutput, EncodedFileType } = await import('livekit-server-sdk');
+  const output = new EncodedFileOutput({
+    filepath: outputPath,
+    fileType: EncodedFileType.MP4,
   });
+
+  const info = await egress.startRoomCompositeEgress(roomName, output);
 
   return info.egressId;
 }
@@ -194,10 +196,16 @@ export async function sendDataMessage(
   } = {}
 ): Promise<void> {
   const service = getRoomService();
-  await service.sendData(roomName, data, {
-    destinationIdentities: options.destinationIdentities,
-    topic: options.topic,
-  });
+  const { DataPacket_Kind } = await import('livekit-server-sdk');
+  await service.sendData(
+    roomName,
+    data,
+    DataPacket_Kind.RELIABLE,
+    {
+      destinationIdentities: options.destinationIdentities,
+      topic: options.topic,
+    }
+  );
 }
 
 /**

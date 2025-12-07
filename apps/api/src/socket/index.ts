@@ -315,12 +315,14 @@ async function updatePresence(
   }
 }
 
+type PresenceStatus = 'ONLINE' | 'AWAY' | 'DND' | 'OFFLINE';
+
 /**
  * Get presence for multiple users
  */
 async function getPresenceForUsers(
   userIds: string[]
-): Promise<Array<{ userId: string; status: string; message?: string; lastActiveAt?: string }>> {
+): Promise<Array<{ userId: string; status: PresenceStatus; message?: string; lastActiveAt?: string }>> {
   const redis = getRedis();
   const results = [];
 
@@ -329,7 +331,7 @@ async function getPresenceForUsers(
     if (presence.status) {
       results.push({
         userId,
-        status: presence.status,
+        status: presence.status as PresenceStatus,
         message: presence.message || undefined,
         lastActiveAt: presence.lastActiveAt,
       });
@@ -362,7 +364,7 @@ export async function sendNotification(
     id: string;
     type: string;
     title: string;
-    body?: string;
+    body?: string | null;
     data?: Record<string, unknown>;
   }
 ): Promise<void> {
@@ -371,6 +373,7 @@ export async function sendNotification(
     if (sockets && sockets.size > 0) {
       io.to(Array.from(sockets)).emit(SocketEvents.NOTIFICATION, {
         ...notification,
+        body: notification.body ?? null,
         createdAt: new Date().toISOString(),
       });
     }

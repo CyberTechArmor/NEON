@@ -48,8 +48,9 @@ router.post(
         select: { storageUsed: true, storageLimit: true, maxFileSize: true },
       });
 
-      if (req.file.size > (org?.maxFileSize ?? config.files.maxFileSize)) {
-        throw new FileTooLargeError(org?.maxFileSize ?? config.files.maxFileSize);
+      const maxFileSize = Number(org?.maxFileSize ?? config.files.maxFileSize);
+      if (req.file.size > maxFileSize) {
+        throw new FileTooLargeError(maxFileSize);
       }
 
       const effectiveLimit = user?.storageLimit ?? org?.storageLimit;

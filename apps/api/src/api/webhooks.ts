@@ -56,7 +56,7 @@ router.post('/livekit', async (req: Request, res: Response, next: NextFunction) 
         console.log('[Webhook] Unhandled event:', event.event);
     }
 
-    res.json({ received: true });
+    return res.json({ received: true });
   } catch (error) {
     next(error);
   }

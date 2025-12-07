@@ -137,7 +137,7 @@ router.get('/stats', requirePermission('org:view_settings'), async (req: Request
  */
 router.post('/jobs/:name/trigger', requirePermission('super_admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const success = await triggerJob(req.params.name);
+    const success = await triggerJob(req.params.name!);
 
     res.json({
       success: true,

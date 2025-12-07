@@ -16,7 +16,7 @@ let publisher: Redis | null = null;
 /**
  * Get Redis client options
  */
-function getRedisOptions(): Redis.RedisOptions {
+function getRedisOptions(): ConstructorParameters<typeof Redis>[0] {
   const url = new URL(config.redis.url);
 
   return {
