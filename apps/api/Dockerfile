@@ -6,8 +6,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies and update npm
-RUN apk add --no-cache python3 make g++ && \
+# Install build dependencies (including openssl for Prisma) and update npm
+RUN apk add --no-cache python3 make g++ openssl openssl-dev && \
     npm install -g npm@latest
 
 # Copy all package files first for better layer caching
@@ -42,8 +42,9 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Update npm in production image
-RUN npm install -g npm@latest
+# Install openssl (required by Prisma) and update npm
+RUN apk add --no-cache openssl && \
+    npm install -g npm@latest
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
