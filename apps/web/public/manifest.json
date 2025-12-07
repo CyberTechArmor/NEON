@@ -9,15 +9,21 @@
   "orientation": "any",
   "icons": [
     {
-      "src": "/neon-icon-192.png",
+      "src": "/neon-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/neon-icon.svg",
       "sizes": "192x192",
-      "type": "image/png",
+      "type": "image/svg+xml",
       "purpose": "any maskable"
     },
     {
-      "src": "/neon-icon-512.png",
+      "src": "/neon-icon.svg",
       "sizes": "512x512",
-      "type": "image/png",
+      "type": "image/svg+xml",
       "purpose": "any maskable"
     }
   ],
@@ -27,13 +33,13 @@
       "name": "New Message",
       "short_name": "Message",
       "url": "/chat",
-      "icons": [{ "src": "/neon-icon-192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "/neon-icon.svg", "sizes": "any", "type": "image/svg+xml" }]
     },
     {
       "name": "Join Meeting",
       "short_name": "Meeting",
       "url": "/meetings",
-      "icons": [{ "src": "/neon-icon-192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "/neon-icon.svg", "sizes": "any", "type": "image/svg+xml" }]
     }
   ],
   "screenshots": [],

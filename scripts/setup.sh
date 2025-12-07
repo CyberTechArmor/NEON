@@ -997,7 +997,16 @@ services:
     build:
       context: ../
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: https://$DOMAIN/api
+        VITE_WS_URL: wss://$DOMAIN
+        VITE_LIVEKIT_URL: wss://$LIVEKIT_DOMAIN
+        VITE_APP_NAME: NEON
     restart: unless-stopped
+    environment:
+      VITE_API_URL: https://$DOMAIN/api
+      VITE_WS_URL: wss://$DOMAIN
+      VITE_LIVEKIT_URL: wss://$LIVEKIT_DOMAIN
     env_file:
       - ../apps/web/.env
     networks:
@@ -1214,9 +1223,18 @@ services:
     build:
       context: ../
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: https://$DOMAIN/api
+        VITE_WS_URL: wss://$DOMAIN
+        VITE_LIVEKIT_URL: wss://$LIVEKIT_DOMAIN
+        VITE_APP_NAME: NEON
     restart: unless-stopped
     ports:
       - "${BIND_ADDRESS}:3000:80"
+    environment:
+      VITE_API_URL: https://$DOMAIN/api
+      VITE_WS_URL: wss://$DOMAIN
+      VITE_LIVEKIT_URL: wss://$LIVEKIT_DOMAIN
     env_file:
       - ../apps/web/.env
     networks:
@@ -1447,38 +1465,73 @@ for i in {1..30}; do
     sleep 2
 done
 
-# Wait for API to be built and running
-echo -n "  Waiting for API..."
-for i in {1..60}; do
-    if $DOCKER_COMPOSE_CMD exec -T api wget -q --spider http://localhost:3001/api/health 2>/dev/null; then
+# Wait for API to be built and running (this can take several minutes on first build)
+echo -n "  Waiting for API (this may take a few minutes on first build)..."
+API_READY=false
+for i in {1..120}; do
+    # Check if container is running
+    if ! $DOCKER_COMPOSE_CMD ps api 2>/dev/null | grep -q "Up"; then
+        # Container not up yet, show progress
+        if [ $((i % 10)) -eq 0 ]; then
+            echo -n "."
+        fi
+        sleep 3
+        continue
+    fi
+
+    # Container is running, check health endpoint
+    if $DOCKER_COMPOSE_CMD exec -T api wget -q --spider http://localhost:3001/api/health 2>/dev/null || \
+       $DOCKER_COMPOSE_CMD exec -T api curl -sf http://localhost:3001/api/health >/dev/null 2>&1; then
         echo -e " ${GREEN}ready${NC}"
+        API_READY=true
         break
     fi
-    if [ $i -eq 60 ]; then
-        echo -e " ${YELLOW}timeout (continuing anyway)${NC}"
+
+    # Show progress every 10 iterations
+    if [ $((i % 10)) -eq 0 ]; then
+        echo -n "."
     fi
     sleep 3
 done
 
-echo ""
-
-# Initialize database
-print_info "Initializing database..."
-echo ""
-
-echo "  Running migrations..."
-if $DOCKER_COMPOSE_CMD exec -T api npm run db:migrate 2>&1 | grep -v "^>" | head -20; then
-    print_success "Database migrations complete."
-else
-    print_warning "Migration may have had issues. Check logs if needed."
+if [ "$API_READY" = false ]; then
+    echo -e " ${YELLOW}timeout${NC}"
+    print_warning "API did not respond in time. Checking container logs..."
+    echo ""
+    $DOCKER_COMPOSE_CMD logs --tail=20 api 2>&1 | head -30
+    echo ""
+    print_warning "The API may still be starting. You can check status with: cd docker && docker compose logs -f api"
+    echo ""
 fi
 
 echo ""
-echo "  Seeding initial data..."
-if $DOCKER_COMPOSE_CMD exec -T api npm run db:seed 2>&1 | grep -v "^>" | head -20; then
-    print_success "Database seeding complete."
+
+# Initialize database (only if API is ready)
+if [ "$API_READY" = true ]; then
+    print_info "Initializing database..."
+    echo ""
+
+    echo "  Running migrations..."
+    if $DOCKER_COMPOSE_CMD exec -T api npm run db:migrate 2>&1 | grep -v "^>" | head -20; then
+        print_success "Database migrations complete."
+    else
+        print_warning "Migration may have had issues. Check logs if needed."
+    fi
+
+    echo ""
+    echo "  Seeding initial data..."
+    if $DOCKER_COMPOSE_CMD exec -T api npm run db:seed 2>&1 | grep -v "^>" | head -20; then
+        print_success "Database seeding complete."
+    else
+        print_warning "Seeding may have had issues. Check logs if needed."
+    fi
 else
-    print_warning "Seeding may have had issues. Check logs if needed."
+    print_warning "Skipping database initialization - API not ready."
+    echo ""
+    echo "  To initialize the database manually once API is running:"
+    echo "    cd docker && docker compose exec api npm run db:migrate"
+    echo "    cd docker && docker compose exec api npm run db:seed"
+    echo ""
 fi
 
 # Final summary
