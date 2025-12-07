@@ -86,6 +86,7 @@ VOLUME_PREFIX="docker_"  # docker-compose prefixes volumes with directory name
 VOLUMES_TO_REMOVE=(
     "${VOLUME_PREFIX}postgres_data"
     "${VOLUME_PREFIX}redis_data"
+    "${VOLUME_PREFIX}minio_data"
     "${VOLUME_PREFIX}garage_data"
     "${VOLUME_PREFIX}garage_meta"
     "${VOLUME_PREFIX}egress_tmp"
@@ -102,6 +103,7 @@ done
 VOLUMES_NO_PREFIX=(
     "postgres_data"
     "redis_data"
+    "minio_data"
     "garage_data"
     "garage_meta"
     "egress_tmp"
