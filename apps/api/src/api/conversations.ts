@@ -67,7 +67,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
  * POST /conversations
  * Create new conversation
  */
-router.post('/', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const data = createConversationSchema.parse(req.body);
 

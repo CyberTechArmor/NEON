@@ -15,7 +15,7 @@ const router = Router();
  * POST /webhooks/livekit
  * Handle LiveKit webhooks
  */
-router.post('/livekit', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/livekit', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
 
