@@ -118,23 +118,151 @@ generate_password() {
     openssl rand -base64 "$length" 2>/dev/null | tr -dc 'a-zA-Z0-9' | head -c "$length"
 }
 
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$ID
+        OS_VERSION=$VERSION_ID
+    elif [ -f /etc/debian_version ]; then
+        OS="debian"
+    elif [ -f /etc/redhat-release ]; then
+        OS="rhel"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        OS="macos"
+    else
+        OS="unknown"
+    fi
+}
+
+install_docker() {
+    print_info "Installing Docker..."
+    echo ""
+
+    detect_os
+
+    case "$OS" in
+        ubuntu|debian|pop)
+            echo "  Detected: $OS"
+            echo "  Installing Docker via official script..."
+            echo ""
+
+            # Install prerequisites
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ca-certificates curl gnupg lsb-release
+
+            # Use Docker's convenience script
+            curl -fsSL https://get.docker.com | sudo sh
+
+            # Add current user to docker group
+            sudo usermod -aG docker "$USER"
+
+            print_success "Docker installed successfully."
+            print_warning "You may need to log out and back in for group changes to take effect."
+            ;;
+
+        fedora|rhel|centos|rocky|alma)
+            echo "  Detected: $OS"
+            echo "  Installing Docker via official script..."
+            echo ""
+
+            # Use Docker's convenience script
+            curl -fsSL https://get.docker.com | sudo sh
+
+            # Start and enable Docker
+            sudo systemctl start docker
+            sudo systemctl enable docker
+
+            # Add current user to docker group
+            sudo usermod -aG docker "$USER"
+
+            print_success "Docker installed successfully."
+            print_warning "You may need to log out and back in for group changes to take effect."
+            ;;
+
+        arch|manjaro)
+            echo "  Detected: $OS"
+            echo "  Installing Docker via pacman..."
+            echo ""
+
+            sudo pacman -Sy --noconfirm docker docker-compose
+            sudo systemctl start docker
+            sudo systemctl enable docker
+            sudo usermod -aG docker "$USER"
+
+            print_success "Docker installed successfully."
+            ;;
+
+        macos)
+            echo "  Detected: macOS"
+            echo ""
+            print_error "Please install Docker Desktop for Mac manually:"
+            echo "    https://docs.docker.com/desktop/install/mac-install/"
+            echo ""
+            echo "  After installing, run this script again."
+            exit 1
+            ;;
+
+        *)
+            print_error "Unsupported operating system: $OS"
+            echo ""
+            echo "Please install Docker manually:"
+            echo "  https://docs.docker.com/get-docker/"
+            exit 1
+            ;;
+    esac
+}
+
 check_dependencies() {
-    local missing=()
+    local docker_missing=false
+    local compose_missing=false
 
     if ! command -v docker &> /dev/null; then
-        missing+=("docker")
+        docker_missing=true
     fi
 
     if ! command -v docker compose &> /dev/null && ! command -v docker-compose &> /dev/null; then
-        missing+=("docker-compose")
+        compose_missing=true
     fi
 
-    if [ ${#missing[@]} -gt 0 ]; then
-        print_error "Missing required dependencies: ${missing[*]}"
+    if [ "$docker_missing" = true ]; then
+        print_warning "Docker is not installed."
         echo ""
-        echo "Please install Docker and Docker Compose before running this script."
-        echo "  - Docker: https://docs.docker.com/get-docker/"
-        echo "  - Docker Compose: https://docs.docker.com/compose/install/"
+        prompt_yes_no "Would you like to install Docker now?" "y" INSTALL_DOCKER
+
+        if [ "$INSTALL_DOCKER" = true ]; then
+            install_docker
+
+            # Verify installation
+            if ! command -v docker &> /dev/null; then
+                print_error "Docker installation failed. Please install manually."
+                exit 1
+            fi
+
+            # Check if we need to use sudo for docker or newgrp
+            if ! docker ps &>/dev/null; then
+                print_warning "Docker installed but requires logout/login for permissions."
+                echo ""
+                echo "  Options:"
+                echo "    1. Log out and back in, then run this script again"
+                echo "    2. Run: newgrp docker && ./scripts/setup.sh"
+                echo ""
+                exit 0
+            fi
+        else
+            print_error "Docker is required to run NEON."
+            echo ""
+            echo "Install Docker manually: https://docs.docker.com/get-docker/"
+            exit 1
+        fi
+    fi
+
+    # Re-check compose after potential Docker installation
+    if ! command -v docker compose &> /dev/null && ! command -v docker-compose &> /dev/null; then
+        print_error "Docker Compose is not available."
+        echo ""
+        echo "Docker Compose should be included with Docker. Try:"
+        echo "  - Updating Docker to the latest version"
+        echo "  - Or install docker-compose-plugin: sudo apt install docker-compose-plugin"
         exit 1
     fi
 }
