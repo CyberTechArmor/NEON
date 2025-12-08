@@ -15,6 +15,7 @@ import {
   passwordChangeSchema,
   mfaSetupSchema,
   mfaVerifySchema,
+  type LoginResponse,
 } from '@neon/shared';
 import { authenticate, requireMfa } from '../middleware/auth';
 import * as AuthService from '../services/auth';
@@ -55,8 +56,11 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
       });
     }
 
+    // TypeScript narrowing: at this point result is LoginResponse (not MFA required)
+    const loginResponse = result as LoginResponse;
+
     // Set refresh token as HTTP-only cookie
-    res.cookie(config.auth.sessionCookieName, result.refreshToken, {
+    res.cookie(config.auth.sessionCookieName, loginResponse.refreshToken, {
       httpOnly: true,
       secure: config.auth.sessionCookieSecure,
       signed: true,
@@ -64,13 +68,13 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
       sameSite: 'lax',
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: {
-        user: result.user,
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        expiresAt: result.expiresAt,
+        user: loginResponse.user,
+        accessToken: loginResponse.accessToken,
+        refreshToken: loginResponse.refreshToken,
+        expiresAt: loginResponse.expiresAt,
       },
       meta: {
         requestId: req.requestId,
