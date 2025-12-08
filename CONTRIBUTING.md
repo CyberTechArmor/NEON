@@ -493,6 +493,65 @@ saveMutation.mutate({ storage: storageData });
    - `none`: No cross-department messaging
 4. Apply `requireApprovalForCrossDept` when set
 
+### Issue: TypeScript Build Fails with Type Assignment Errors
+
+**Symptom:** Docker build or `npm run build` fails with TypeScript errors like:
+```
+error TS2322: Type '"new_value"' is not assignable to type '"allowed" | "values" | "only"'.
+```
+
+**Cause:** When adding new functionality that uses string literal types (union types), the code uses a new value that isn't included in the type definition. This commonly happens with:
+- `source` fields in permission systems
+- `status` or `type` enums
+- API response types
+
+**Example (from commit b1d1730):**
+The `permissions.ts` service added `'org_policy'` as a permission source, but the `ResolvedPermission` type in `packages/database/src/types.ts` only allowed:
+```typescript
+source: 'user' | 'user_role' | 'role' | 'department' | 'default' | 'super_admin';
+```
+
+**Solution:**
+1. When adding new string values, always check the type definition first
+2. Update the type definition to include the new value:
+```typescript
+source: 'user' | 'user_role' | 'role' | 'department' | 'default' | 'super_admin' | 'org_policy';
+```
+
+**Prevention:**
+1. **Run TypeScript build locally before committing:** `npm run build` or `npx tsc --noEmit`
+2. **Search for type definitions:** When using a typed field, search for its definition (e.g., `grep -r "source:" packages/`)
+3. **Co-locate type changes:** When adding new features that extend types, update the type definition in the same commit
+4. **Use IDE type checking:** TypeScript-aware IDEs will highlight type errors immediately
+
+### Issue: Duplicate Array.find() Calls in React Components
+
+**Symptom:** Performance degradation or unnecessary re-computations in React components.
+
+**Cause:** Finding the same item multiple times when only one lookup is needed:
+```tsx
+// Bad: Finds the same item twice
+{participants.find(p => p.id !== userId)?.displayName ||
+ participants.find(p => p.id !== userId)?.name}
+```
+
+**Solution:** Use an IIFE or extract to a variable:
+```tsx
+// Good: Single lookup
+{(() => {
+  const other = participants.find(p => p.id !== userId);
+  return other?.displayName || other?.name;
+})()}
+```
+
+Or extract to a useMemo for more complex cases:
+```tsx
+const otherUser = useMemo(() =>
+  participants.find(p => p.id !== userId),
+  [participants, userId]
+);
+```
+
 ---
 
 ## Getting Help
