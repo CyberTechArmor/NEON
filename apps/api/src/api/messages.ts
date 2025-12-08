@@ -7,7 +7,7 @@ import { prisma } from '@neon/database';
 import { sendMessageSchema, editMessageSchema, addReactionSchema, cursorPaginationSchema } from '@neon/shared';
 import { NotFoundError, ForbiddenError, FrozenConversationError } from '@neon/shared';
 import { authenticate } from '../middleware/auth';
-import { broadcastToConversation, broadcastToUsers } from '../socket';
+import { broadcastToConversation, broadcastToUsers, broadcastToConversationParticipants } from '../socket';
 import { SocketEvents } from '@neon/shared';
 import { AuditService } from '../services/audit';
 
@@ -157,22 +157,12 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       },
     });
 
-    // Get all participants to broadcast to their personal user rooms
-    // This ensures users receive messages even when not viewing this conversation
-    const participants = await prisma.conversationParticipant.findMany({
-      where: {
-        conversationId,
-        leftAt: null,
-      },
-      select: { userId: true },
-    });
+    // Broadcast message to all conversation participants using direct socket IDs
+    // This is more reliable than room-based broadcasting and ensures real-time delivery
+    await broadcastToConversationParticipants(conversationId, SocketEvents.MESSAGE_RECEIVED, message);
 
-    // Broadcast to conversation room (for users actively viewing)
+    // Also broadcast to conversation room as a fallback (for users actively viewing)
     broadcastToConversation(conversationId, SocketEvents.MESSAGE_RECEIVED, message);
-
-    // Also broadcast to all participant user rooms (for notifications on any page)
-    const participantUserIds = participants.map((p: { userId: string }) => p.userId);
-    broadcastToUsers(participantUserIds, SocketEvents.MESSAGE_RECEIVED, message);
 
     res.status(201).json({
       success: true,
@@ -213,12 +203,16 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
       },
     });
 
-    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_EDITED, {
+    const editPayload = {
       messageId: updated.id,
       conversationId: message.conversationId,
       content: updated.content,
       editedAt: updated.editedAt,
-    });
+    };
+
+    // Use direct socket broadcast for reliable real-time updates
+    await broadcastToConversationParticipants(message.conversationId, SocketEvents.MESSAGE_EDITED, editPayload);
+    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_EDITED, editPayload);
 
     await AuditService.log({
       action: 'message.edited',
@@ -267,11 +261,15 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
       },
     });
 
-    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_DELETED, {
+    const deletePayload = {
       messageId: message.id,
       conversationId: message.conversationId,
       deletedBy: req.userId,
-    });
+    };
+
+    // Use direct socket broadcast for reliable real-time updates
+    await broadcastToConversationParticipants(message.conversationId, SocketEvents.MESSAGE_DELETED, deletePayload);
+    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_DELETED, deletePayload);
 
     await AuditService.log({
       action: 'message.deleted',
@@ -328,13 +326,17 @@ router.post('/:id/reactions', async (req: Request, res: Response, next: NextFunc
       },
     });
 
-    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_REACTION_ADDED, {
+    const reactionPayload = {
       messageId: message.id,
       conversationId: message.conversationId,
       userId: req.userId,
       userDisplayName: (reaction as { user: { displayName: string } }).user.displayName,
       emoji,
-    });
+    };
+
+    // Use direct socket broadcast for reliable real-time updates
+    await broadcastToConversationParticipants(message.conversationId, SocketEvents.MESSAGE_REACTION_ADDED, reactionPayload);
+    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_REACTION_ADDED, reactionPayload);
 
     res.json({
       success: true,
@@ -370,12 +372,16 @@ router.delete('/:id/reactions/:emoji', async (req: Request, res: Response, next:
       },
     });
 
-    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_REACTION_REMOVED, {
+    const removeReactionPayload = {
       messageId: message.id,
       conversationId: message.conversationId,
       userId: req.userId,
-      emoji: req.params.emoji,
-    });
+      emoji: decodeURIComponent(req.params.emoji!),
+    };
+
+    // Use direct socket broadcast for reliable real-time updates
+    await broadcastToConversationParticipants(message.conversationId, SocketEvents.MESSAGE_REACTION_REMOVED, removeReactionPayload);
+    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_REACTION_REMOVED, removeReactionPayload);
 
     res.json({
       success: true,
