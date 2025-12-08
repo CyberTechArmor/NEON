@@ -396,7 +396,9 @@ function ConversationItem({
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-medium truncate">{displayName}</span>
+          <span className={`truncate ${
+            conversation.unreadCount > 0 ? 'font-bold text-white' : 'font-medium'
+          }`}>{displayName}</span>
           {conversation.lastMessage && (
             <span className="text-xs text-neon-text-muted flex-shrink-0">
               {formatDistanceToNow(new Date(conversation.lastMessage.createdAt), {
@@ -410,7 +412,11 @@ function ConversationItem({
           {indicatorColor && (
             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${indicatorColor}`} />
           )}
-          <span className="text-sm text-neon-text-secondary truncate flex-1">
+          <span className={`text-sm truncate flex-1 ${
+            conversation.unreadCount > 0
+              ? 'font-semibold text-white'
+              : 'text-neon-text-secondary'
+          }`}>
             {getLastMessagePreview()}
           </span>
           {conversation.unreadCount > 0 && (
