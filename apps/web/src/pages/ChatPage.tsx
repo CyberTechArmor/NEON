@@ -565,7 +565,7 @@ export default function ChatPage() {
     hasMoreMessages,
     setHasMoreMessages,
   } = useChatStore();
-  const { joinConversation, leaveConversation, sendTyping, stopTyping } = useSocketStore();
+  const { joinConversation, leaveConversation, sendTyping, stopTyping, isConnected } = useSocketStore();
 
   const [messageInput, setMessageInput] = useState('');
   const [replyTo, setReplyTo] = useState<any>(null);
@@ -628,6 +628,13 @@ export default function ChatPage() {
       setCurrentConversation(conversationId);
     }
   }, [conversationId, currentConversationId, joinConversation, leaveConversation, setCurrentConversation]);
+
+  // Rejoin conversation room when socket reconnects
+  useEffect(() => {
+    if (isConnected && conversationId) {
+      joinConversation(conversationId);
+    }
+  }, [isConnected, conversationId, joinConversation]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
