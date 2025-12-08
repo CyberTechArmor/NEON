@@ -427,7 +427,7 @@ router.delete('/users/:id', requirePermission('users:manage'), async (req: Reque
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -781,7 +781,7 @@ router.delete('/roles/:id', requirePermission('roles:manage'), async (req: Reque
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -1048,7 +1048,7 @@ router.delete('/departments/:id', requirePermission('departments:manage'), async
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -1604,7 +1604,7 @@ router.post('/demo-user/regenerate', requirePermission('org:manage_settings'), a
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
