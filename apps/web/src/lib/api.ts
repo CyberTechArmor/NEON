@@ -423,4 +423,15 @@ export const adminApi = {
 
   testStorageConnection: (config: Record<string, unknown>) =>
     api.post<ApiResponse<{ success: boolean; message?: string }>>('/admin/organization/test-storage', config),
+
+  // Demo user management
+  demoUser: {
+    get: () => api.get<ApiResponse<{ enabled: boolean; email?: string; password?: string; userId?: string }>>('/admin/demo-user'),
+
+    enable: () => api.post<ApiResponse<{ enabled: boolean; email: string; password: string; userId: string }>>('/admin/demo-user/enable'),
+
+    disable: () => api.post<ApiResponse<{ enabled: boolean }>>('/admin/demo-user/disable'),
+
+    regenerate: () => api.post<ApiResponse<{ enabled: boolean; email: string; password: string; userId: string }>>('/admin/demo-user/regenerate'),
+  },
 };

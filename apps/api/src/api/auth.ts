@@ -6,6 +6,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { getConfig } from '@neon/config';
+import { prisma } from '@neon/database';
 import {
   loginSchema,
   refreshTokenSchema,
@@ -303,16 +304,64 @@ router.post('/mfa/setup', authenticate, async (req: Request, res: Response, next
  */
 router.post('/mfa/verify', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { code, method } = mfaVerifySchema.parse(req.body);
+    const { code, method, secret } = req.body;
 
-    // TODO: Implement full MFA verification
-    // For now, just a placeholder
+    // Get the pending MFA secret from the user or from the request
+    // In a full implementation, we'd store the secret temporarily in Redis
+    // For now, we'll get it from the request or verify against stored secret
+
+    let mfaSecret = secret;
+
+    // If no secret provided, try to get the pending secret from cache or user
+    if (!mfaSecret && req.user) {
+      // Check if user already has MFA secret (re-verification)
+      const user = await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { mfaSecret: true, mfaEnabled: true },
+      });
+
+      if (user?.mfaSecret) {
+        mfaSecret = user.mfaSecret;
+      }
+    }
+
+    if (!mfaSecret) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'MFA_SECRET_MISSING', message: 'MFA secret not found. Please restart the setup process.' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Verify the TOTP code
+    const isValid = AuthService.verifyTotpCode(code, mfaSecret);
+
+    if (!isValid) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_MFA_CODE', message: 'Invalid verification code. Please try again.' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Generate backup codes
+    const backupCodes = AuthService.generateBackupCodes();
+
+    // Update the user to enable MFA and save the secret
+    await prisma.user.update({
+      where: { id: req.userId },
+      data: {
+        mfaEnabled: true,
+        mfaSecret: mfaSecret,
+        mfaBackupCodes: backupCodes,
+      },
+    });
 
     res.json({
       success: true,
       data: {
         message: 'MFA enabled successfully',
-        backupCodes: AuthService.generateBackupCodes(),
+        backupCodes,
       },
       meta: {
         requestId: req.requestId,
