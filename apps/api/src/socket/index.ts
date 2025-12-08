@@ -245,6 +245,34 @@ export function createSocketServer(httpServer: HttpServer): Server {
     });
 
     // ==========================================================================
+    // Test Alerts
+    // ==========================================================================
+
+    socket.on('test:alert:send', async (data: { title: string; body: string }) => {
+      const alertId = `alert-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      const alert = {
+        id: alertId,
+        title: data.title || 'Test Alert',
+        body: data.body || 'This is a test alert.',
+        createdAt: new Date().toISOString(),
+      };
+
+      // Send to all user's connected sockets (all devices)
+      const sockets = userSockets.get(userId);
+      if (sockets && sockets.size > 0) {
+        io!.to(Array.from(sockets)).emit('test:alert', alert);
+      }
+    });
+
+    socket.on('test:alert:acknowledge', (data: { id: string }) => {
+      // Notify all user's devices that the alert was acknowledged
+      const sockets = userSockets.get(userId);
+      if (sockets && sockets.size > 0) {
+        io!.to(Array.from(sockets)).emit('test:alert:acknowledged', { id: data.id });
+      }
+    });
+
+    // ==========================================================================
     // Disconnect
     // ==========================================================================
 

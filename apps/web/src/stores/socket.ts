@@ -24,10 +24,33 @@ interface PresenceUser {
   lastSeen?: string;
 }
 
+interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  body?: string | null;
+  read: boolean;
+  createdAt: string;
+  data?: Record<string, unknown> | null;
+}
+
+interface TestAlert {
+  id: string;
+  title: string;
+  body: string;
+  createdAt: string;
+  acknowledged: boolean;
+}
+
 interface SocketState {
   socket: Socket | null;
   isConnected: boolean;
+  lastConnectedAt: number | null;
+  lastActivityAt: number | null;
   presence: Record<string, PresenceUser>;
+  notifications: Notification[];
+  unreadNotificationCount: number;
+  activeTestAlert: TestAlert | null;
 
   // Actions
   connect: () => void;
@@ -42,12 +65,25 @@ interface SocketState {
   joinConversation: (conversationId: string) => void;
   leaveConversation: (conversationId: string) => void;
   updatePresence: (status: string, statusMessage?: string) => void;
+  updateActivity: () => void;
+  isUserActive: (userId: string) => boolean;
+  addNotification: (notification: Notification) => void;
+  markNotificationRead: (id: string) => void;
+  markAllNotificationsRead: () => void;
+  setNotifications: (notifications: Notification[]) => void;
+  sendTestAlert: () => void;
+  acknowledgeTestAlert: () => void;
 }
 
 export const useSocketStore = create<SocketState>((set, get) => ({
   socket: null,
   isConnected: false,
+  lastConnectedAt: null,
+  lastActivityAt: null,
   presence: {},
+  notifications: [],
+  unreadNotificationCount: 0,
+  activeTestAlert: null,
 
   connect: () => {
     const { accessToken } = useAuthStore.getState();
@@ -63,7 +99,8 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
     socket.on('connect', () => {
       console.log('[Socket] Connected');
-      set({ isConnected: true });
+      const now = Date.now();
+      set({ isConnected: true, lastConnectedAt: now, lastActivityAt: now });
     });
 
     socket.on('disconnect', (reason) => {
@@ -79,7 +116,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     // Message events - use correct event names matching backend SocketEvents
     socket.on('message:received', (message: any) => {
       // Handle message received event from backend
-      useChatStore.getState().addMessage(message.conversationId, {
+      const formattedMessage = {
         ...message,
         sender: {
           id: message.sender?.id,
@@ -87,7 +124,17 @@ export const useSocketStore = create<SocketState>((set, get) => ({
           displayName: message.sender?.displayName,
           avatarUrl: message.sender?.avatarUrl,
         },
+      };
+      useChatStore.getState().addMessage(message.conversationId, formattedMessage);
+
+      // Update conversation's lastMessage for real-time updates
+      useChatStore.getState().updateConversation(message.conversationId, {
+        lastMessage: formattedMessage,
+        updatedAt: message.createdAt,
       });
+
+      // Update activity timestamp
+      set({ lastActivityAt: Date.now() });
     });
 
     socket.on('message:edited', (data: any) => {
@@ -186,6 +233,37 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       // This will be handled by a call notification component
     });
 
+    // Notification events - real-time notifications via WebSocket
+    socket.on('notification', (notification: any) => {
+      console.log('[Socket] Notification received:', notification);
+      set((state) => ({
+        notifications: [{ ...notification, read: false }, ...state.notifications],
+        unreadNotificationCount: state.unreadNotificationCount + 1,
+        lastActivityAt: Date.now(),
+      }));
+    });
+
+    // Test alert events - alerts that show on all logged-in devices
+    socket.on('test:alert', (alert: any) => {
+      console.log('[Socket] Test alert received:', alert);
+      set({
+        activeTestAlert: {
+          id: alert.id,
+          title: alert.title,
+          body: alert.body,
+          createdAt: alert.createdAt,
+          acknowledged: false,
+        },
+        lastActivityAt: Date.now(),
+      });
+    });
+
+    // Test alert acknowledged on another device
+    socket.on('test:alert:acknowledged', () => {
+      console.log('[Socket] Test alert acknowledged on another device');
+      set({ activeTestAlert: null });
+    });
+
     set({ socket });
   },
 
@@ -257,5 +335,72 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     // Send uppercase status for backend compatibility
     const normalizedStatus = status.toUpperCase() === 'BUSY' ? 'DND' : status.toUpperCase();
     socket.emit('presence:update', { status: normalizedStatus, statusMessage });
+  },
+
+  updateActivity: () => {
+    set({ lastActivityAt: Date.now() });
+  },
+
+  isUserActive: (userId: string) => {
+    const { presence, lastActivityAt } = get();
+    const userPresence = presence[userId];
+    if (!userPresence) return false;
+
+    // User is active if they have ONLINE status and were active within last 5 minutes
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    const lastSeen = userPresence.lastSeen ? new Date(userPresence.lastSeen).getTime() : 0;
+    return userPresence.status === 'ONLINE' && lastSeen > fiveMinutesAgo;
+  },
+
+  addNotification: (notification) => {
+    set((state) => ({
+      notifications: [notification, ...state.notifications],
+      unreadNotificationCount: notification.read
+        ? state.unreadNotificationCount
+        : state.unreadNotificationCount + 1,
+    }));
+  },
+
+  markNotificationRead: (id) => {
+    const { socket } = get();
+    if (socket) {
+      socket.emit('notification:read', id);
+    }
+    set((state) => ({
+      notifications: state.notifications.map((n) =>
+        n.id === id ? { ...n, read: true } : n
+      ),
+      unreadNotificationCount: Math.max(0, state.unreadNotificationCount - 1),
+    }));
+  },
+
+  markAllNotificationsRead: () => {
+    set((state) => ({
+      notifications: state.notifications.map((n) => ({ ...n, read: true })),
+      unreadNotificationCount: 0,
+    }));
+  },
+
+  setNotifications: (notifications) => {
+    set({
+      notifications,
+      unreadNotificationCount: notifications.filter((n) => !n.read).length,
+    });
+  },
+
+  sendTestAlert: () => {
+    const { socket } = get();
+    if (!socket) return;
+    socket.emit('test:alert:send', {
+      title: 'Test Alert',
+      body: 'This is a test alert sent to all your logged-in devices.',
+    });
+  },
+
+  acknowledgeTestAlert: () => {
+    const { socket, activeTestAlert } = get();
+    if (!socket || !activeTestAlert) return;
+    socket.emit('test:alert:acknowledge', { id: activeTestAlert.id });
+    set({ activeTestAlert: null });
   },
 }));

@@ -291,7 +291,7 @@ function ConversationItem({
   isActive: boolean;
   onClick: () => void;
 }) {
-  const { presence } = useSocketStore();
+  const { presence, isConnected, lastActivityAt } = useSocketStore();
   const { user } = useAuthStore();
 
   // For direct messages, get the other participant
@@ -313,6 +313,58 @@ function ConversationItem({
   const userPresence =
     otherParticipant && presence[otherParticipant.id]?.status;
 
+  // Determine if the other user is active (connected within last 5 minutes)
+  const otherUserPresence = otherParticipant ? presence[otherParticipant.id] : null;
+  const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+  const isOtherUserActive = otherUserPresence &&
+    otherUserPresence.status === 'ONLINE' &&
+    otherUserPresence.lastSeen &&
+    new Date(otherUserPresence.lastSeen).getTime() > fiveMinutesAgo;
+
+  // Get the last message preview with sender name for group chats
+  const getLastMessagePreview = () => {
+    if (!conversation.lastMessage) return 'No messages yet';
+
+    const lastMsg = conversation.lastMessage;
+    const content = lastMsg.content || '[Attachment]';
+
+    // For group chats, show who sent the message
+    if (conversation.type === 'GROUP' && lastMsg.sender) {
+      const senderName = lastMsg.senderId === user?.id
+        ? 'You'
+        : (lastMsg.sender.displayName || lastMsg.sender.name || 'Someone');
+      return `${senderName}: ${content}`;
+    }
+
+    // For direct messages
+    if (lastMsg.senderId === user?.id) {
+      return `You: ${content}`;
+    }
+
+    return content;
+  };
+
+  // Determine message status indicator color
+  const getMessageIndicatorColor = () => {
+    if (!conversation.lastMessage) return null;
+
+    // If there are unread messages, show blue
+    if (conversation.unreadCount > 0) return 'bg-neon-info';
+
+    // If the last message was sent by current user
+    if (conversation.lastMessage.senderId === user?.id) {
+      // Check if the other user is online/active - show green for delivered
+      if (isOtherUserActive) return 'bg-neon-success';
+      // Show gray for sent but recipient offline
+      return 'bg-neon-text-muted';
+    }
+
+    // Last message was received and read
+    return 'bg-neon-success';
+  };
+
+  const indicatorColor = getMessageIndicatorColor();
+
   return (
     <button
       className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors
@@ -330,7 +382,13 @@ function ConversationItem({
         </div>
         {userPresence && (
           <span
-            className={`absolute -bottom-0.5 -right-0.5 status-dot status-${userPresence}`}
+            className={`absolute -bottom-0.5 -right-0.5 status-dot ${
+              isOtherUserActive ? 'status-online' :
+              userPresence.toLowerCase() === 'online' ? 'status-away' :
+              userPresence.toLowerCase() === 'away' ? 'status-away' :
+              userPresence.toLowerCase() === 'dnd' || userPresence.toLowerCase() === 'busy' ? 'status-busy' :
+              'status-offline'
+            }`}
           />
         )}
       </div>
@@ -347,9 +405,13 @@ function ConversationItem({
             </span>
           )}
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm text-neon-text-secondary truncate">
-            {conversation.lastMessage?.content || 'No messages yet'}
+        <div className="flex items-center gap-2">
+          {/* Message indicator dot */}
+          {indicatorColor && (
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${indicatorColor}`} />
+          )}
+          <span className="text-sm text-neon-text-secondary truncate flex-1">
+            {getLastMessagePreview()}
           </span>
           {conversation.unreadCount > 0 && (
             <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-xs font-medium bg-white text-neon-bg rounded-full">
@@ -415,7 +477,7 @@ function MessageBubble({
         {/* Message bubble */}
         <div className="relative">
           <div className={`message-bubble ${isOwn ? 'message-bubble-own' : 'message-bubble-other'}`}>
-            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+            <p>{message.content}</p>
           </div>
 
           {/* Actions menu */}
@@ -522,14 +584,16 @@ export default function ChatPage() {
   });
 
   // Fetch messages for current conversation
-  const { isLoading: isLoadingMessages } = useQuery({
+  const { isLoading: isLoadingMessages, refetch: refetchMessages } = useQuery({
     queryKey: ['messages', conversationId],
     queryFn: async () => {
       if (!conversationId) return [];
       const response = await messagesApi.list(conversationId, { limit: 50 });
-      setMessages(conversationId, (response.data.data as any[]).reverse());
+      // Messages from API are already in chronological order (oldest first)
+      const messagesData = response.data.data as any[];
+      setMessages(conversationId, messagesData);
       setHasMoreMessages(conversationId, response.data.meta?.pagination?.hasNext || false);
-      return response.data.data;
+      return messagesData;
     },
     enabled: !!conversationId,
   });

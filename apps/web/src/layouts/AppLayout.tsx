@@ -19,6 +19,9 @@ import {
   ChevronDown,
   Check,
   Loader2,
+  AlertTriangle,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 
 interface Notification {
@@ -33,32 +36,48 @@ interface Notification {
 
 export default function AppLayout() {
   const { user, logout, hasPermission } = useAuthStore();
-  const { connect, disconnect, isConnected, updatePresence } = useSocketStore();
+  const {
+    connect,
+    disconnect,
+    isConnected,
+    updatePresence,
+    notifications: socketNotifications,
+    unreadNotificationCount,
+    setNotifications,
+    markNotificationRead,
+    markAllNotificationsRead,
+    activeTestAlert,
+    acknowledgeTestAlert,
+    lastActivityAt,
+  } = useSocketStore();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
-  // Fetch notifications
+  // Initial fetch of notifications (then use WebSocket for real-time updates)
   const { data: notificationsData, isLoading: notificationsLoading } = useQuery({
     queryKey: ['notifications'],
     queryFn: async () => {
       const response = await notificationsApi.list({ limit: 20 });
-      return response.data.data as Notification[];
+      const data = response.data.data as Notification[];
+      // Set initial notifications in socket store
+      setNotifications(data);
+      return data;
     },
-    refetchInterval: 30000, // Refetch every 30 seconds
+    staleTime: Infinity, // Don't refetch automatically, use WebSocket instead
   });
 
-  const unreadCount = notificationsData?.filter((n) => !n.read).length || 0;
+  // Use socket notifications if available, otherwise fall back to query data
+  const displayNotifications = socketNotifications.length > 0 ? socketNotifications : (notificationsData || []);
+  const unreadCount = unreadNotificationCount || displayNotifications.filter((n) => !n.read).length;
 
   // Mark notification as read
   const markReadMutation = useMutation({
     mutationFn: async (id: string) => {
       await notificationsApi.markRead(id);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      markNotificationRead(id);
     },
   });
 
@@ -66,9 +85,7 @@ export default function AppLayout() {
   const markAllReadMutation = useMutation({
     mutationFn: async () => {
       await notificationsApi.markAllRead();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      markAllNotificationsRead();
     },
   });
 
@@ -81,6 +98,16 @@ export default function AppLayout() {
       disconnect();
     };
   }, [connect, disconnect, updatePresence]);
+
+  // Calculate connection status for display
+  const getConnectionStatus = () => {
+    if (!isConnected) return 'disconnected';
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    if (lastActivityAt && lastActivityAt < fiveMinutesAgo) return 'inactive';
+    return 'active';
+  };
+
+  const connectionStatus = getConnectionStatus();
 
   const handleLogout = async () => {
     await logout();
@@ -205,8 +232,16 @@ export default function AppLayout() {
 
             {/* Connection status */}
             <div className="mt-3 flex items-center gap-2 text-xs text-neon-text-muted">
-              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-neon-success' : 'bg-neon-error'}`} />
-              <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+              <span className={`w-2 h-2 rounded-full ${
+                connectionStatus === 'active' ? 'bg-neon-success' :
+                connectionStatus === 'inactive' ? 'bg-neon-warning' :
+                'bg-neon-error'
+              }`} />
+              <span>{
+                connectionStatus === 'active' ? 'Active' :
+                connectionStatus === 'inactive' ? 'Inactive' :
+                'Disconnected'
+              }</span>
             </div>
           </div>
         </div>
@@ -258,14 +293,14 @@ export default function AppLayout() {
                     <div className="flex items-center justify-center py-8">
                       <Loader2 className="w-6 h-6 animate-spin text-neon-text-muted" />
                     </div>
-                  ) : !notificationsData?.length ? (
+                  ) : !displayNotifications?.length ? (
                     <div className="py-8 text-center text-neon-text-muted">
                       <Bell className="w-8 h-8 mx-auto mb-2 opacity-50" />
                       <p className="text-sm">No notifications</p>
                     </div>
                   ) : (
                     <div className="divide-y divide-neon-border">
-                      {notificationsData.map((notification) => (
+                      {displayNotifications.map((notification) => (
                         <div
                           key={notification.id}
                           className={`p-3 hover:bg-neon-surface-hover cursor-pointer ${
@@ -320,6 +355,44 @@ export default function AppLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Test Alert Modal */}
+      {activeTestAlert && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative bg-neon-surface border-2 border-neon-warning rounded-lg shadow-xl w-full max-w-md animate-scale-in">
+            {/* Header with warning icon */}
+            <div className="flex items-center gap-4 p-6 border-b border-neon-border">
+              <div className="flex-shrink-0 w-12 h-12 rounded-full bg-neon-warning/20 flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6 text-neon-warning" />
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold text-white">{activeTestAlert.title}</h2>
+                <p className="text-sm text-neon-text-muted">Test Alert</p>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="p-6">
+              <p className="text-neon-text-secondary">{activeTestAlert.body}</p>
+              <p className="mt-4 text-xs text-neon-text-muted">
+                Received at {new Date(activeTestAlert.createdAt).toLocaleTimeString()}
+              </p>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end p-4 border-t border-neon-border">
+              <button
+                className="btn btn-primary"
+                onClick={acknowledgeTestAlert}
+              >
+                <Check className="w-4 h-4" />
+                <span>Acknowledge</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
