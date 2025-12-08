@@ -336,6 +336,7 @@ The Docker build follows a specific order. Errors at one stage will fail the ent
 |-------|-------|-----|
 | `TS7030: Not all code paths return a value` | Missing `return` in catch block | Add `return` before `next(error)` |
 | `TS2345: Argument of type '"event:name"' is not assignable` | Socket event not in type definitions | Add event to `ClientToServerEvents`/`ServerToClientEvents` in `packages/shared/src/types/events.ts` |
+| `TS2353: 'renotify' does not exist in type 'NotificationOptions'` | Web API property not in TypeScript types | Use type assertion: `{ ...options } as NotificationOptions` |
 | `Cannot find module '@neon/shared'` | Package not built | Ensure build order is correct |
 | `Prisma Client not generated` | Missing prisma generate | Run generate before build |
 | `Module not found: @prisma/client` | Prisma not generated | Add prisma generate step |
@@ -552,6 +553,57 @@ const otherUser = useMemo(() =>
   [participants, userId]
 );
 ```
+
+### Issue: Browser Notification API Property Not in TypeScript (TS2353)
+
+**Symptom:** TypeScript build fails with errors like:
+```
+error TS2353: Object literal may only specify known properties, and 'renotify' does not exist in type 'NotificationOptions'.
+```
+
+**Cause:** The Web Notifications API includes properties like `renotify`, `vibrate`, `silent`, and others that are valid according to the spec but are not included in TypeScript's built-in `NotificationOptions` type definition in `lib.dom.d.ts`.
+
+**Example:**
+```typescript
+// Bad: TypeScript doesn't recognize 'renotify'
+showBrowserNotification(title, {
+  body: 'Message content',
+  tag: 'conversation-123',
+  renotify: true,  // ERROR: TS2353
+});
+```
+
+**Solution:** Use type assertion to tell TypeScript the object conforms to `NotificationOptions`:
+```typescript
+// Good: Type assertion for extended notification options
+showBrowserNotification(title, {
+  body: 'Message content',
+  tag: 'conversation-123',
+  renotify: true,
+} as NotificationOptions);
+```
+
+**Alternative Solution:** Create an extended interface for full type safety:
+```typescript
+// In a types file
+interface ExtendedNotificationOptions extends NotificationOptions {
+  renotify?: boolean;
+  vibrate?: number[];
+  silent?: boolean;
+}
+
+// Usage
+showBrowserNotification(title, {
+  body: 'Message content',
+  renotify: true,
+} as ExtendedNotificationOptions);
+```
+
+**Prevention:**
+1. Be aware that TypeScript's DOM type definitions may not include all Web API properties
+2. Check MDN documentation when using browser APIs for property availability
+3. Use type assertions for valid API properties not in TypeScript definitions
+4. Consider creating extended interfaces for frequently used browser APIs
 
 ### Issue: WebSocket Event Type Mismatch (TS2345)
 
