@@ -50,6 +50,7 @@ async function isSuperAdmin(userId: string): Promise<boolean> {
  *
  * Resolution order (first match wins):
  * 0. Super admin bypass - super admins can communicate with anyone
+ * 0a. Target is super admin - anyone can message a super admin
  * 1. User ↔ User explicit
  * 2. User ↔ Role explicit
  * 3. Role ↔ Role explicit
@@ -73,12 +74,37 @@ export async function resolvePermission(
     };
   }
 
+  // 0a. Target is super admin - anyone can message a super admin
+  // This allows regular users (like demo users) to reach out to admins
+  const targetIsSuperAdmin = await isSuperAdmin(targetUserId);
+  if (targetIsSuperAdmin) {
+    return {
+      canChat: true,
+      canCall: true,
+      canViewPresence: true,
+      requiresApproval: false,
+      source: 'super_admin',
+    };
+  }
+
   // Check cache
   const cacheKey = `perm:${sourceUserId}:${targetUserId}`;
   const cached = await getCache<ResolvedPermission>(cacheKey);
   if (cached) {
     return cached;
   }
+
+  // Get organization messaging settings
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { settings: true },
+  });
+  const orgSettings = org?.settings as Record<string, any> | null;
+  const messagingSettings = orgSettings?.messaging || {
+    crossDepartmentMessaging: true,
+    crossDepartmentDirection: 'both',
+    requireApprovalForCrossDept: false,
+  };
 
   // Get source and target user info
   const [sourceUser, targetUser] = await Promise.all([
@@ -192,6 +218,50 @@ export async function resolvePermission(
       return permission;
     }
 
+    // Check organization-wide cross-department messaging settings
+    if (!messagingSettings.crossDepartmentMessaging || messagingSettings.crossDepartmentDirection === 'none') {
+      const permission: ResolvedPermission = {
+        canChat: false,
+        canCall: false,
+        canViewPresence: true, // Can still see presence
+        requiresApproval: false,
+        source: 'org_policy',
+      };
+      await setCache(cacheKey, permission, CACHE_TTL);
+      return permission;
+    }
+
+    // Check directionality based on department ranks
+    const sourceRank = sourceUser.department?.rank ?? 0;
+    const targetRank = targetUser.department?.rank ?? 0;
+
+    if (messagingSettings.crossDepartmentDirection === 'higher_to_lower' && sourceRank < targetRank) {
+      // Source has lower rank but direction is higher-to-lower only
+      const permission: ResolvedPermission = {
+        canChat: false,
+        canCall: false,
+        canViewPresence: true,
+        requiresApproval: false,
+        source: 'org_policy',
+      };
+      await setCache(cacheKey, permission, CACHE_TTL);
+      return permission;
+    }
+
+    if (messagingSettings.crossDepartmentDirection === 'lower_to_higher' && sourceRank > targetRank) {
+      // Source has higher rank but direction is lower-to-higher only
+      const permission: ResolvedPermission = {
+        canChat: false,
+        canCall: false,
+        canViewPresence: true,
+        requiresApproval: false,
+        source: 'org_policy',
+      };
+      await setCache(cacheKey, permission, CACHE_TTL);
+      return permission;
+    }
+
+    // Check for explicit department-level permissions
     const deptPermission = await prisma.departmentPermission.findFirst({
       where: {
         OR: [
@@ -203,14 +273,29 @@ export async function resolvePermission(
 
     if (deptPermission) {
       const isSourceDept = deptPermission.sourceDeptId === sourceUser.departmentId;
-      const sourceRank = sourceUser.department?.rank ?? 0;
-      const targetRank = targetUser.department?.rank ?? 0;
       const permission = resolveDeptDirection(
         deptPermission,
         isSourceDept,
         sourceRank,
         targetRank
       );
+      // Apply org-level approval requirement if set
+      if (messagingSettings.requireApprovalForCrossDept) {
+        permission.requiresApproval = true;
+      }
+      await setCache(cacheKey, permission, CACHE_TTL);
+      return permission;
+    }
+
+    // Default cross-department behavior (allowed if org settings permit)
+    if (messagingSettings.crossDepartmentMessaging && messagingSettings.crossDepartmentDirection === 'both') {
+      const permission: ResolvedPermission = {
+        canChat: true,
+        canCall: true,
+        canViewPresence: true,
+        requiresApproval: messagingSettings.requireApprovalForCrossDept || false,
+        source: 'org_policy',
+      };
       await setCache(cacheKey, permission, CACHE_TTL);
       return permission;
     }

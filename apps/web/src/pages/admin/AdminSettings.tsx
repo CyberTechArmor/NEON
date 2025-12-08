@@ -15,6 +15,9 @@ import {
   UserCheck,
   Copy,
   RefreshCw,
+  MessageSquare,
+  ArrowRight,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { adminApi, getErrorMessage } from '../../lib/api';
 
@@ -30,8 +33,15 @@ interface S3Settings {
   publicUrl?: string;
 }
 
+interface MessagingSettings {
+  crossDepartmentMessaging: boolean;
+  crossDepartmentDirection: 'both' | 'higher_to_lower' | 'lower_to_higher' | 'none';
+  requireApprovalForCrossDept: boolean;
+}
+
 interface OrganizationSettings {
   storage: S3Settings;
+  messaging: MessagingSettings;
   complianceMode: 'HIPAA' | 'GDPR' | 'STANDARD';
   messageRetentionDays: number;
   maxUploadSize: number;
@@ -125,6 +135,12 @@ export function AdminSettings() {
     publicUrl: '',
   });
 
+  const [messagingSettings, setMessagingSettings] = useState<MessagingSettings>({
+    crossDepartmentMessaging: true,
+    crossDepartmentDirection: 'both',
+    requireApprovalForCrossDept: false,
+  });
+
   // Update form data when settings are loaded
   useEffect(() => {
     if (settings?.storage) {
@@ -143,6 +159,13 @@ export function AdminSettings() {
       if (settings.storage.enabled && settings.storage.bucket) {
         setConnectionStatus('success');
       }
+    }
+    if (settings?.messaging) {
+      setMessagingSettings({
+        crossDepartmentMessaging: settings.messaging.crossDepartmentMessaging ?? true,
+        crossDepartmentDirection: settings.messaging.crossDepartmentDirection || 'both',
+        requireApprovalForCrossDept: settings.messaging.requireApprovalForCrossDept || false,
+      });
     }
   }, [settings]);
 
@@ -182,7 +205,12 @@ export function AdminSettings() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    saveMutation.mutate({ storage: formData });
+    // Only include secretAccessKey if user entered a new one (don't overwrite existing with empty)
+    const storageData = { ...formData };
+    if (!storageData.secretAccessKey) {
+      delete storageData.secretAccessKey;
+    }
+    saveMutation.mutate({ storage: storageData });
   };
 
   const providerPresets: Record<string, Partial<S3Settings>> = {
@@ -417,7 +445,14 @@ export function AdminSettings() {
                     <button
                       type="button"
                       className="btn btn-primary"
-                      onClick={() => saveMutation.mutate({ storage: formData })}
+                      onClick={() => {
+                        // Only include secretAccessKey if user entered a new one
+                        const storageData = { ...formData };
+                        if (!storageData.secretAccessKey) {
+                          delete storageData.secretAccessKey;
+                        }
+                        saveMutation.mutate({ storage: storageData });
+                      }}
                       disabled={saveMutation.isPending}
                     >
                       {saveMutation.isPending ? (
@@ -507,6 +542,162 @@ export function AdminSettings() {
               <p className="mt-1 text-xs text-neon-text-muted">
                 Comma-separated file extensions
               </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Cross-Department Messaging Settings */}
+        <div className="card p-6 mb-6">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-lg bg-neon-primary/20 flex items-center justify-center">
+              <MessageSquare className="w-5 h-5 text-neon-primary" />
+            </div>
+            <div>
+              <h3 className="text-lg font-medium">Cross-Department Messaging</h3>
+              <p className="text-sm text-neon-text-muted">
+                Control how users from different departments can communicate
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            {/* Enable toggle */}
+            <div className="flex items-center justify-between p-4 bg-neon-surface-hover rounded-lg">
+              <div>
+                <p className="font-medium">Allow Cross-Department Messaging</p>
+                <p className="text-sm text-neon-text-muted">
+                  Users can message people outside their department
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={messagingSettings.crossDepartmentMessaging}
+                  onChange={(e) => setMessagingSettings({ ...messagingSettings, crossDepartmentMessaging: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-neon-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-accent"></div>
+              </label>
+            </div>
+
+            {messagingSettings.crossDepartmentMessaging && (
+              <>
+                {/* Directionality */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">Message Direction</label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button
+                      type="button"
+                      className={`p-4 rounded-lg border text-left transition-colors ${
+                        messagingSettings.crossDepartmentDirection === 'both'
+                          ? 'border-neon-accent bg-neon-accent/20'
+                          : 'border-neon-border hover:border-neon-text-muted'
+                      }`}
+                      onClick={() => setMessagingSettings({ ...messagingSettings, crossDepartmentDirection: 'both' })}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <ArrowLeftRight className="w-4 h-4" />
+                        <span className="font-medium">Bidirectional</span>
+                      </div>
+                      <p className="text-xs text-neon-text-muted">
+                        Any department can message any other department
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      className={`p-4 rounded-lg border text-left transition-colors ${
+                        messagingSettings.crossDepartmentDirection === 'higher_to_lower'
+                          ? 'border-neon-accent bg-neon-accent/20'
+                          : 'border-neon-border hover:border-neon-text-muted'
+                      }`}
+                      onClick={() => setMessagingSettings({ ...messagingSettings, crossDepartmentDirection: 'higher_to_lower' })}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <ArrowRight className="w-4 h-4" />
+                        <span className="font-medium">Top-Down Only</span>
+                      </div>
+                      <p className="text-xs text-neon-text-muted">
+                        Higher ranked departments can message lower ranked
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      className={`p-4 rounded-lg border text-left transition-colors ${
+                        messagingSettings.crossDepartmentDirection === 'lower_to_higher'
+                          ? 'border-neon-accent bg-neon-accent/20'
+                          : 'border-neon-border hover:border-neon-text-muted'
+                      }`}
+                      onClick={() => setMessagingSettings({ ...messagingSettings, crossDepartmentDirection: 'lower_to_higher' })}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <ArrowRight className="w-4 h-4 rotate-180" />
+                        <span className="font-medium">Bottom-Up Only</span>
+                      </div>
+                      <p className="text-xs text-neon-text-muted">
+                        Lower ranked departments can message higher ranked
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      className={`p-4 rounded-lg border text-left transition-colors ${
+                        messagingSettings.crossDepartmentDirection === 'none'
+                          ? 'border-neon-accent bg-neon-accent/20'
+                          : 'border-neon-border hover:border-neon-text-muted'
+                      }`}
+                      onClick={() => setMessagingSettings({ ...messagingSettings, crossDepartmentDirection: 'none' })}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <MessageSquare className="w-4 h-4" />
+                        <span className="font-medium">Same Department Only</span>
+                      </div>
+                      <p className="text-xs text-neon-text-muted">
+                        Users can only message within their own department
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Approval required */}
+                <div className="flex items-center justify-between p-4 bg-neon-surface-hover rounded-lg">
+                  <div>
+                    <p className="font-medium">Require Approval</p>
+                    <p className="text-sm text-neon-text-muted">
+                      Cross-department messages require admin approval first
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={messagingSettings.requireApprovalForCrossDept}
+                      onChange={(e) => setMessagingSettings({ ...messagingSettings, requireApprovalForCrossDept: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-neon-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-accent"></div>
+                  </label>
+                </div>
+              </>
+            )}
+
+            {/* Save messaging settings */}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => saveMutation.mutate({ messaging: messagingSettings } as any)}
+                disabled={saveMutation.isPending}
+              >
+                {saveMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save Messaging Settings</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

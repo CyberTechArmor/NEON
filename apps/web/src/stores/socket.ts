@@ -76,49 +76,67 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       set({ isConnected: false });
     });
 
-    // Message events
-    socket.on('message:new', (data) => {
-      useChatStore.getState().addMessage(data.conversationId, data.message);
+    // Message events - use correct event names matching backend SocketEvents
+    socket.on('message:received', (message: any) => {
+      // Handle message received event from backend
+      useChatStore.getState().addMessage(message.conversationId, {
+        ...message,
+        sender: {
+          id: message.sender?.id,
+          name: message.sender?.displayName || message.sender?.name,
+          displayName: message.sender?.displayName,
+          avatarUrl: message.sender?.avatarUrl,
+        },
+      });
     });
 
-    socket.on('message:updated', (data) => {
+    socket.on('message:edited', (data: any) => {
       useChatStore.getState().updateMessage(
         data.conversationId,
         data.messageId,
-        data.updates
+        { content: data.content, editedAt: data.editedAt }
       );
     });
 
-    socket.on('message:deleted', (data) => {
+    socket.on('message:deleted', (data: any) => {
       useChatStore.getState().removeMessage(data.conversationId, data.messageId);
     });
 
-    socket.on('message:reaction', (data) => {
+    socket.on('message:reaction:added', (data: any) => {
       const messages = useChatStore.getState().messages[data.conversationId];
       const message = messages?.find((m) => m.id === data.messageId);
       if (message) {
-        const reactions = data.action === 'add'
-          ? [...message.reactions, data.reaction]
-          : message.reactions.filter(
-              (r) => !(r.emoji === data.reaction.emoji && r.userId === data.reaction.userId)
-            );
+        const reactions = [...message.reactions, { emoji: data.emoji, userId: data.userId, userName: data.userDisplayName }];
         useChatStore.getState().updateMessage(data.conversationId, data.messageId, {
           reactions,
         });
       }
     });
 
-    // Typing events
-    socket.on('user:typing', (data) => {
-      useChatStore.getState().setTypingUser(data.conversationId, {
-        odId: data.userId,
-        name: data.userName,
-        startedAt: Date.now(),
-      });
+    socket.on('message:reaction:removed', (data: any) => {
+      const messages = useChatStore.getState().messages[data.conversationId];
+      const message = messages?.find((m) => m.id === data.messageId);
+      if (message) {
+        const reactions = message.reactions.filter(
+          (r) => !(r.emoji === data.emoji && r.userId === data.userId)
+        );
+        useChatStore.getState().updateMessage(data.conversationId, data.messageId, {
+          reactions,
+        });
+      }
     });
 
-    socket.on('user:stopped_typing', (data) => {
-      useChatStore.getState().removeTypingUser(data.conversationId, data.userId);
+    // Typing events - use correct event names matching backend SocketEvents
+    socket.on('typing:indicator', (data: any) => {
+      if (data.isTyping) {
+        useChatStore.getState().setTypingUser(data.conversationId, {
+          odId: data.userId,
+          name: data.displayName,
+          startedAt: Date.now(),
+        });
+      } else {
+        useChatStore.getState().removeTypingUser(data.conversationId, data.userId);
+      }
     });
 
     // Presence events
@@ -151,13 +169,14 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       }));
     });
 
-    // Conversation events
-    socket.on('conversation:created', (data) => {
-      useChatStore.getState().addConversation(data.conversation);
+    // Conversation events - use correct event names matching backend SocketEvents
+    socket.on('conversation:created', (conversation: any) => {
+      // The event sends the conversation directly, not wrapped in data
+      useChatStore.getState().addConversation(conversation);
     });
 
-    socket.on('conversation:updated', (data) => {
-      useChatStore.getState().updateConversation(data.conversationId, data.updates);
+    socket.on('conversation:updated', (data: any) => {
+      useChatStore.getState().updateConversation(data.conversationId, data.changes);
     });
 
     // Call events
