@@ -21,6 +21,7 @@ import {
   Key,
   Globe,
   Upload,
+  Settings,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { adminApi, getErrorMessage } from '../lib/api';
@@ -32,6 +33,7 @@ import {
   SSOConfiguration,
   FederationBridges,
   BulkImport,
+  AdminSettings,
 } from './admin';
 
 // Helper function to format bytes
@@ -635,6 +637,12 @@ export default function AdminPage() {
       label: 'Audit Log',
       permission: 'audit:view',
     },
+    {
+      to: '/admin/settings',
+      icon: Settings,
+      label: 'Settings',
+      permission: 'org:manage_settings',
+    },
   ].filter((item) => hasPermission(item.permission));
 
   return (
@@ -671,6 +679,7 @@ export default function AdminPage() {
           <Route path="federation" element={<FederationBridges />} />
           <Route path="import" element={<BulkImport />} />
           <Route path="audit" element={<AuditLogViewer />} />
+          <Route path="settings" element={<AdminSettings />} />
         </Routes>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Routes, Route, NavLink, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -16,14 +16,19 @@ import {
   Eye,
   EyeOff,
   Check,
+  X,
+  Copy,
+  Smartphone,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
-import { usersApi, authApi, getErrorMessage } from '../lib/api';
+import { usersApi, authApi, filesApi, getErrorMessage } from '../lib/api';
 
 // Profile settings
 function ProfileSettings() {
   const { user, setUser } = useAuthStore();
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const profileSchema = z.object({
     name: z.string().min(2, 'Name must be at least 2 characters'),
@@ -46,13 +51,58 @@ function ProfileSettings() {
       return response.data.data;
     },
     onSuccess: (data: any) => {
-      setUser({ ...user!, name: data.name });
+      setUser({ ...user!, name: data.name || data.displayName });
       toast.success('Profile updated');
     },
     onError: (error) => {
       toast.error(getErrorMessage(error));
     },
   });
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be less than 5MB');
+      return;
+    }
+
+    // Show preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setAvatarPreview(e.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+
+    // Upload file
+    setIsUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('type', 'avatar');
+
+      const uploadResponse = await filesApi.upload(formData);
+      const fileUrl = uploadResponse.data.data?.url;
+
+      // Update profile with new avatar
+      const response = await usersApi.updateProfile({ avatarUrl: fileUrl });
+      setUser({ ...user!, avatarUrl: fileUrl });
+      toast.success('Avatar updated');
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+      setAvatarPreview(null);
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
 
   const onSubmit = (data: { name: string }) => {
     updateProfileMutation.mutate(data);
@@ -78,9 +128,25 @@ function ProfileSettings() {
                 <span>{user?.name?.charAt(0).toUpperCase()}</span>
               )}
             </div>
-            <button type="button" className="btn btn-secondary">
-              <Camera className="w-4 h-4" />
-              <span>Change</span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleAvatarChange}
+              className="hidden"
+            />
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploadingAvatar}
+            >
+              {isUploadingAvatar ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Camera className="w-4 h-4" />
+              )}
+              <span>{isUploadingAvatar ? 'Uploading...' : 'Change'}</span>
             </button>
           </div>
         </div>
@@ -139,6 +205,11 @@ function ProfileSettings() {
 function SecuritySettings() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showMfaSetup, setShowMfaSetup] = useState(false);
+  const [mfaSecret, setMfaSecret] = useState<string | null>(null);
+  const [mfaQrCode, setMfaQrCode] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
 
   const passwordSchema = z
     .object({
@@ -174,6 +245,52 @@ function SecuritySettings() {
       toast.error(getErrorMessage(error));
     },
   });
+
+  const setupMfaMutation = useMutation({
+    mutationFn: async () => {
+      const response = await authApi.setupMfa('TOTP');
+      return response.data.data;
+    },
+    onSuccess: (data: any) => {
+      setMfaSecret(data.secret);
+      setMfaQrCode(data.qrCode);
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error));
+    },
+  });
+
+  const verifyMfaMutation = useMutation({
+    mutationFn: async (code: string) => {
+      const response = await authApi.verifyMfa(code, 'TOTP');
+      return response.data.data;
+    },
+    onSuccess: (data: any) => {
+      setBackupCodes(data.backupCodes);
+      toast.success('Two-factor authentication enabled');
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error));
+    },
+  });
+
+  const handleStartMfaSetup = () => {
+    setShowMfaSetup(true);
+    setupMfaMutation.mutate();
+  };
+
+  const handleVerifyMfa = () => {
+    if (mfaCode.length !== 6) {
+      toast.error('Please enter a 6-digit code');
+      return;
+    }
+    verifyMfaMutation.mutate(mfaCode);
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success('Copied to clipboard');
+  };
 
   const onSubmit = (data: PasswordFormData) => {
     changePasswordMutation.mutate({ currentPassword: data.currentPassword, newPassword: data.newPassword });
@@ -279,17 +396,132 @@ function SecuritySettings() {
       {/* MFA */}
       <div>
         <h3 className="text-lg font-medium mb-4">Two-factor authentication</h3>
-        <div className="card p-4 max-w-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium">Authenticator app</p>
-              <p className="text-sm text-neon-text-muted">
-                Use an authenticator app for 2FA
-              </p>
+
+        {!showMfaSetup ? (
+          <div className="card p-4 max-w-md">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Authenticator app</p>
+                <p className="text-sm text-neon-text-muted">
+                  Use an authenticator app for 2FA
+                </p>
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={handleStartMfaSetup}
+                disabled={setupMfaMutation.isPending}
+              >
+                {setupMfaMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  'Enable'
+                )}
+              </button>
             </div>
-            <button className="btn btn-secondary">Enable</button>
           </div>
-        </div>
+        ) : backupCodes ? (
+          // Show backup codes after successful setup
+          <div className="card p-4 max-w-md">
+            <div className="flex items-center gap-2 mb-4 text-neon-success">
+              <Check className="w-5 h-5" />
+              <span className="font-medium">Two-factor authentication enabled</span>
+            </div>
+            <p className="text-sm text-neon-text-muted mb-4">
+              Save these backup codes in a safe place. You can use them to access your account if you lose your authenticator device.
+            </p>
+            <div className="grid grid-cols-2 gap-2 p-3 bg-neon-surface-hover rounded-lg mb-4">
+              {backupCodes.map((code, index) => (
+                <code key={index} className="text-sm font-mono">{code}</code>
+              ))}
+            </div>
+            <button
+              className="btn btn-secondary w-full"
+              onClick={() => copyToClipboard(backupCodes.join('\n'))}
+            >
+              <Copy className="w-4 h-4" />
+              <span>Copy backup codes</span>
+            </button>
+          </div>
+        ) : (
+          // MFA setup flow
+          <div className="card p-4 max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="font-medium">Setup authenticator app</h4>
+              <button
+                className="btn btn-icon btn-ghost btn-sm"
+                onClick={() => {
+                  setShowMfaSetup(false);
+                  setMfaSecret(null);
+                  setMfaQrCode(null);
+                  setMfaCode('');
+                }}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {setupMfaMutation.isPending ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-8 h-8 animate-spin text-neon-text-muted" />
+              </div>
+            ) : mfaSecret && mfaQrCode ? (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm mb-2">1. Scan this QR code with your authenticator app:</p>
+                  <div className="flex justify-center p-4 bg-white rounded-lg">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(mfaQrCode)}`}
+                      alt="QR Code"
+                      className="w-48 h-48"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-sm mb-2">Or enter this code manually:</p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 p-2 bg-neon-surface-hover rounded text-sm font-mono break-all">
+                      {mfaSecret}
+                    </code>
+                    <button
+                      className="btn btn-icon btn-ghost btn-sm"
+                      onClick={() => copyToClipboard(mfaSecret)}
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-sm mb-2">2. Enter the 6-digit code from your authenticator app:</p>
+                  <input
+                    type="text"
+                    className="input text-center text-lg tracking-widest"
+                    maxLength={6}
+                    placeholder="000000"
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                  />
+                </div>
+
+                <button
+                  className="btn btn-primary w-full"
+                  onClick={handleVerifyMfa}
+                  disabled={mfaCode.length !== 6 || verifyMfaMutation.isPending}
+                >
+                  {verifyMfaMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Verifying...</span>
+                    </>
+                  ) : (
+                    <span>Verify and enable</span>
+                  )}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   );

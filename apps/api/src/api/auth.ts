@@ -51,6 +51,7 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
       data: {
         user: result.user,
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         expiresAt: result.expiresAt,
       },
       meta: {
@@ -75,6 +76,15 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       refreshTokenSchema.parse(req.body).refreshToken;
 
     const result = await AuthService.refreshAccessToken(refreshToken);
+
+    // Update refresh token cookie with rotated token
+    res.cookie(config.auth.sessionCookieName, result.refreshToken, {
+      httpOnly: true,
+      secure: config.auth.sessionCookieSecure,
+      signed: true,
+      maxAge: config.auth.sessionCookieMaxAge,
+      sameSite: 'lax',
+    });
 
     res.json({
       success: true,
