@@ -155,6 +155,7 @@ services:
       REDIS_URL: redis://redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-neon_redis_dev}
       S3_ENDPOINT: http://garage:3900
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-}
       LIVEKIT_URL: ws://livekit:7880
       LIVEKIT_API_URL: http://livekit:7880
       SMTP_HOST: mailpit

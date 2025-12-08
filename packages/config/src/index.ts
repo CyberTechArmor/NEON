@@ -67,6 +67,7 @@ const configSchema = z.object({
   // S3 Storage
   s3: z.object({
     endpoint: z.string().default('http://localhost:3900'),
+    publicEndpoint: z.string().optional(), // External endpoint for pre-signed URLs (defaults to endpoint if not set)
     region: z.string().default('garage'),
     accessKey: z.string(),
     secretKey: z.string(),
@@ -208,6 +209,7 @@ function loadConfig() {
 
     s3: {
       endpoint: env.S3_ENDPOINT,
+      publicEndpoint: env.S3_PUBLIC_ENDPOINT,
       region: env.S3_REGION,
       accessKey: env.S3_ACCESS_KEY,
       secretKey: env.S3_SECRET_KEY,

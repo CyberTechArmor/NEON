@@ -18,9 +18,10 @@ import { getConfig } from '@neon/config';
 const config = getConfig();
 
 let s3Client: S3Client | null = null;
+let s3PublicClient: S3Client | null = null;
 
 /**
- * Get S3 client
+ * Get S3 client for internal API operations
  */
 function getClient(): S3Client {
   if (!s3Client) {
@@ -35,6 +36,26 @@ function getClient(): S3Client {
     });
   }
   return s3Client;
+}
+
+/**
+ * Get S3 client configured for generating public pre-signed URLs
+ * Uses publicEndpoint if configured, otherwise falls back to internal endpoint
+ */
+function getPublicClient(): S3Client {
+  if (!s3PublicClient) {
+    const publicEndpoint = config.s3.publicEndpoint || config.s3.endpoint;
+    s3PublicClient = new S3Client({
+      endpoint: publicEndpoint,
+      region: config.s3.region,
+      credentials: {
+        accessKeyId: config.s3.accessKey,
+        secretAccessKey: config.s3.secretKey,
+      },
+      forcePathStyle: config.s3.forcePathStyle,
+    });
+  }
+  return s3PublicClient;
 }
 
 /**
@@ -185,13 +206,14 @@ export async function listFiles(
 
 /**
  * Get a signed URL for downloading
+ * Uses public endpoint for client-accessible URLs
  */
 export async function getSignedUrl(
   bucket: string,
   key: string,
   expiresIn = 3600
 ): Promise<string> {
-  const client = getClient();
+  const client = getPublicClient();
 
   return awsGetSignedUrl(
     client,
@@ -205,6 +227,7 @@ export async function getSignedUrl(
 
 /**
  * Get a signed URL for uploading
+ * Uses public endpoint for client-accessible URLs
  */
 export async function getUploadSignedUrl(
   bucket: string,
@@ -212,7 +235,7 @@ export async function getUploadSignedUrl(
   contentType: string,
   expiresIn = 3600
 ): Promise<string> {
-  const client = getClient();
+  const client = getPublicClient();
 
   return awsGetSignedUrl(
     client,
