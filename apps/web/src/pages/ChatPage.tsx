@@ -704,11 +704,12 @@ export default function ChatPage() {
                   ) : (
                     <span>
                       {(currentConversation.type === 'DIRECT'
-                        ? currentConversation.participants.find(
-                            (p: any) => p.userId !== user?.id
-                          )?.user.displayName || currentConversation.participants.find(
-                            (p: any) => p.userId !== user?.id
-                          )?.user.name
+                        ? (() => {
+                            const other = currentConversation.participants.find(
+                              (p: any) => p.userId !== user?.id
+                            )?.user;
+                            return other?.displayName || other?.name;
+                          })()
                         : currentConversation.name || 'Group'
                       )?.charAt(0).toUpperCase()}
                     </span>
@@ -717,11 +718,12 @@ export default function ChatPage() {
                 <div className="min-w-0">
                   <h3 className="font-medium truncate">
                     {currentConversation.type === 'DIRECT'
-                      ? currentConversation.participants.find(
-                          (p: any) => p.userId !== user?.id
-                        )?.user.displayName || currentConversation.participants.find(
-                          (p: any) => p.userId !== user?.id
-                        )?.user.name || 'Unknown'
+                      ? (() => {
+                          const other = currentConversation.participants.find(
+                            (p: any) => p.userId !== user?.id
+                          )?.user;
+                          return other?.displayName || other?.name || 'Unknown';
+                        })()
                       : currentConversation.name || 'Group Chat'}
                   </h3>
                   <p className="text-sm text-neon-text-muted">
