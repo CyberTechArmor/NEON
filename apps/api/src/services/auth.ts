@@ -205,6 +205,12 @@ export function generateEmailCode(): string {
 /**
  * Login user
  */
+export type LoginResult = LoginResponse | {
+  requiresMfa: true;
+  userId: string;
+  mfaMethods: readonly string[];
+};
+
 export async function login(
   email: string,
   password: string,
@@ -215,7 +221,7 @@ export async function login(
     ipAddress?: string;
     userAgent?: string;
   } = {}
-): Promise<LoginResponse> {
+): Promise<LoginResult> {
   const { orgSlug, mfaCode, deviceFingerprint, ipAddress, userAgent } = options;
 
   // Check rate limiting
@@ -287,7 +293,12 @@ export async function login(
   // Check MFA
   if (user.mfaEnabled) {
     if (!mfaCode) {
-      throw new MfaRequiredError(['TOTP', 'EMAIL']);
+      // Return MFA required response instead of throwing
+      return {
+        requiresMfa: true,
+        userId: user.id,
+        mfaMethods: ['TOTP', 'EMAIL'] as const,
+      };
     }
 
     // Verify MFA code

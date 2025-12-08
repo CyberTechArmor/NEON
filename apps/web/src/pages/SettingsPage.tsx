@@ -213,15 +213,17 @@ function SecuritySettings() {
   const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
   const [mfaEnabled, setMfaEnabled] = useState(false);
 
-  // Check MFA status on mount
+  // Check MFA status on mount - always fetch fresh data
   useQuery({
-    queryKey: ['user', 'me'],
+    queryKey: ['user', 'me', 'mfa-status'],
     queryFn: async () => {
       const response = await authApi.me();
       const userData = response.data.data as any;
       setMfaEnabled(userData?.mfaEnabled || false);
       return userData;
     },
+    staleTime: 0, // Always consider data stale
+    refetchOnMount: 'always', // Always refetch when component mounts
   });
 
   const passwordSchema = z

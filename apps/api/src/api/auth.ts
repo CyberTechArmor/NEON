@@ -39,6 +39,22 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
       userAgent: req.get('user-agent'),
     });
 
+    // Check if MFA is required
+    if ('requiresMfa' in result && result.requiresMfa) {
+      return res.json({
+        success: true,
+        data: {
+          requiresMfa: true,
+          userId: result.userId,
+          mfaMethods: result.mfaMethods,
+        },
+        meta: {
+          requestId: req.requestId,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
     // Set refresh token as HTTP-only cookie
     res.cookie(config.auth.sessionCookieName, result.refreshToken, {
       httpOnly: true,
@@ -63,6 +79,150 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
     });
   } catch (error) {
     next(error);
+  }
+});
+
+/**
+ * POST /auth/mfa/login
+ * Complete login with MFA code (for users with MFA enabled)
+ */
+router.post('/mfa/login', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, code } = req.body;
+
+    if (!userId || !code) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'userId and code are required' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Find user
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        organization: true,
+        department: { select: { name: true } },
+        role: { select: { name: true, permissions: true } },
+      },
+    });
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'Invalid MFA session' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    if (!user.mfaEnabled || !user.mfaSecret) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'MFA_NOT_ENABLED', message: 'MFA is not enabled for this user' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Verify MFA code
+    let mfaValid = AuthService.verifyTotpCode(code, user.mfaSecret);
+
+    // Check backup codes if TOTP failed
+    if (!mfaValid) {
+      const backupCodeIndex = user.mfaBackupCodes.indexOf(code.toUpperCase());
+      if (backupCodeIndex !== -1) {
+        // Remove used backup code
+        const newBackupCodes = [...user.mfaBackupCodes];
+        newBackupCodes.splice(backupCodeIndex, 1);
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { mfaBackupCodes: newBackupCodes },
+        });
+        mfaValid = true;
+      }
+    }
+
+    if (!mfaValid) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'INVALID_MFA_CODE', message: 'Invalid MFA code' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Generate tokens
+    const { token: accessToken, jti: accessJti } = AuthService.generateAccessToken({
+      id: user.id,
+      orgId: user.orgId,
+      email: user.email,
+      roleId: user.roleId,
+      departmentId: user.departmentId,
+      permissions: user.role?.permissions ?? [],
+    });
+
+    const { token: refreshToken, jti: refreshJti } = AuthService.generateRefreshToken(user.id);
+
+    // Create session
+    await prisma.session.create({
+      data: {
+        userId: user.id,
+        token: accessJti,
+        refreshToken: refreshJti,
+        userAgent: req.get('user-agent'),
+        ipAddress: req.ip,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
+    });
+
+    // Update last login
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+
+    // Set refresh token as HTTP-only cookie
+    res.cookie(config.auth.sessionCookieName, refreshToken, {
+      httpOnly: true,
+      secure: config.auth.sessionCookieSecure,
+      signed: true,
+      maxAge: config.auth.sessionCookieMaxAge,
+      sameSite: 'lax',
+    });
+
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 15);
+
+    return res.json({
+      success: true,
+      data: {
+        user: {
+          id: user.id,
+          orgId: user.orgId,
+          email: user.email,
+          username: user.username,
+          displayName: user.displayName,
+          avatarUrl: user.avatarUrl,
+          status: user.status,
+          departmentId: user.departmentId,
+          roleId: user.roleId,
+          departmentName: user.department?.name ?? null,
+          roleName: user.role?.name ?? null,
+          timezone: user.timezone,
+          locale: user.locale,
+          permissions: user.role?.permissions ?? [],
+          mfaEnabled: user.mfaEnabled,
+        },
+        accessToken,
+        refreshToken,
+        expiresAt: expiresAt.toISOString(),
+      },
+      meta: {
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    return next(error);
   }
 });
 

@@ -114,7 +114,8 @@ export const useAuthStore = create<AuthState>()(
         const { mfaUserId } = get();
         if (!mfaUserId) throw new Error('No MFA session');
 
-        const response = await api.post('/auth/mfa/verify', {
+        // Use the dedicated login MFA endpoint
+        const response = await api.post('/auth/mfa/login', {
           userId: mfaUserId,
           code,
         });
