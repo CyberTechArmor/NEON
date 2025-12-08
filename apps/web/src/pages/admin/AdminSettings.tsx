@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
@@ -12,6 +12,9 @@ import {
   EyeOff,
   Check,
   AlertTriangle,
+  UserCheck,
+  Copy,
+  RefreshCw,
 } from 'lucide-react';
 import { adminApi, getErrorMessage } from '../../lib/api';
 
@@ -36,11 +39,70 @@ interface OrganizationSettings {
   enableFederation: boolean;
 }
 
+interface DemoUserConfig {
+  enabled: boolean;
+  email?: string;
+  password?: string;
+  userId?: string;
+}
+
 export function AdminSettings() {
   const queryClient = useQueryClient();
   const [showSecretKey, setShowSecretKey] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'untested' | 'success' | 'error'>('untested');
+  const [showDemoPassword, setShowDemoPassword] = useState(false);
+
+  // Fetch demo user config
+  const { data: demoUserConfig } = useQuery<DemoUserConfig>({
+    queryKey: ['admin', 'demo-user'],
+    queryFn: async () => {
+      const response = await adminApi.demoUser.get();
+      return response.data.data as DemoUserConfig;
+    },
+  });
+
+  // Demo user mutations
+  const enableDemoUserMutation = useMutation({
+    mutationFn: async () => {
+      const response = await adminApi.demoUser.enable();
+      return response.data.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'demo-user'] });
+      toast.success('Demo user enabled');
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
+
+  const disableDemoUserMutation = useMutation({
+    mutationFn: async () => {
+      const response = await adminApi.demoUser.disable();
+      return response.data.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'demo-user'] });
+      toast.success('Demo user disabled');
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
+
+  const regenerateDemoPasswordMutation = useMutation({
+    mutationFn: async () => {
+      const response = await adminApi.demoUser.regenerate();
+      return response.data.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'demo-user'] });
+      toast.success('Demo user password regenerated');
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success('Copied to clipboard');
+  };
 
   // Fetch current settings
   const { data: settings, isLoading } = useQuery<OrganizationSettings>({
@@ -64,11 +126,25 @@ export function AdminSettings() {
   });
 
   // Update form data when settings are loaded
-  useState(() => {
+  useEffect(() => {
     if (settings?.storage) {
-      setFormData(settings.storage);
+      setFormData({
+        enabled: settings.storage.enabled || false,
+        provider: settings.storage.provider || 'custom',
+        endpoint: settings.storage.endpoint || '',
+        bucket: settings.storage.bucket || '',
+        region: settings.storage.region || 'us-east-1',
+        accessKeyId: settings.storage.accessKeyId || '',
+        secretAccessKey: '', // Don't pre-fill secret key
+        forcePathStyle: settings.storage.forcePathStyle !== false,
+        publicUrl: settings.storage.publicUrl || '',
+      });
+      // If storage is already enabled, set connection status to success
+      if (settings.storage.enabled && settings.storage.bucket) {
+        setConnectionStatus('success');
+      }
     }
-  });
+  }, [settings]);
 
   // Save settings mutation
   const saveMutation = useMutation({
@@ -432,6 +508,125 @@ export function AdminSettings() {
                 Comma-separated file extensions
               </p>
             </div>
+          </div>
+        </div>
+
+        {/* Demo User Settings */}
+        <div className="card">
+          <div className="card-header">
+            <div className="flex items-center gap-2">
+              <UserCheck className="w-5 h-5 text-neon-primary" />
+              <h2 className="card-title">Demo User</h2>
+            </div>
+            <p className="card-description">
+              Enable a demo user account for testing chat features (can only receive/respond, not initiate)
+            </p>
+          </div>
+          <div className="card-body space-y-4">
+            {/* Enable/Disable toggle */}
+            <div className="flex items-center justify-between p-4 bg-neon-surface-hover rounded-lg">
+              <div>
+                <p className="font-medium">Demo User Account</p>
+                <p className="text-sm text-neon-text-muted">
+                  {demoUserConfig?.enabled
+                    ? 'Demo user is currently enabled'
+                    : 'Demo user is currently disabled'}
+                </p>
+              </div>
+              <button
+                type="button"
+                className={`btn ${demoUserConfig?.enabled ? 'btn-error' : 'btn-primary'}`}
+                onClick={() => {
+                  if (demoUserConfig?.enabled) {
+                    disableDemoUserMutation.mutate();
+                  } else {
+                    enableDemoUserMutation.mutate();
+                  }
+                }}
+                disabled={enableDemoUserMutation.isPending || disableDemoUserMutation.isPending}
+              >
+                {(enableDemoUserMutation.isPending || disableDemoUserMutation.isPending) ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : demoUserConfig?.enabled ? (
+                  'Disable'
+                ) : (
+                  'Enable'
+                )}
+              </button>
+            </div>
+
+            {/* Demo credentials */}
+            {demoUserConfig?.enabled && demoUserConfig?.email && (
+              <div className="p-4 bg-neon-surface-hover rounded-lg space-y-4">
+                <div className="flex items-center gap-2 text-neon-success">
+                  <Check className="w-5 h-5" />
+                  <span className="font-medium">Demo User Credentials</span>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-sm text-neon-text-muted">Email</label>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 p-2 bg-neon-bg rounded font-mono text-sm">
+                        {demoUserConfig.email}
+                      </code>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => copyToClipboard(demoUserConfig.email!)}
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm text-neon-text-muted">Password</label>
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type={showDemoPassword ? 'text' : 'password'}
+                          readOnly
+                          value={demoUserConfig.password || '••••••••'}
+                          className="input w-full font-mono text-sm"
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-neon-text-muted hover:text-neon-text"
+                          onClick={() => setShowDemoPassword(!showDemoPassword)}
+                        >
+                          {showDemoPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => copyToClipboard(demoUserConfig.password!)}
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => regenerateDemoPasswordMutation.mutate()}
+                        disabled={regenerateDemoPasswordMutation.isPending}
+                      >
+                        {regenerateDemoPasswordMutation.isPending ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-xs text-neon-text-muted">
+                  This demo user can only receive and respond to chat messages, not initiate conversations.
+                  Use these credentials to test the chat features.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

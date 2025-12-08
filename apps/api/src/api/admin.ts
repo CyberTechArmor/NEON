@@ -197,6 +197,7 @@ router.get('/users', requirePermission('users:manage'), async (req: Request, res
           avatarUrl: true,
           status: true,
           presenceStatus: true,
+          mfaEnabled: true,
           department: { select: { id: true, name: true } },
           role: { select: { id: true, name: true } },
           createdAt: true,
@@ -379,6 +380,29 @@ router.patch('/users/:id', requirePermission('users:manage'), async (req: Reques
  */
 router.delete('/users/:id', requirePermission('users:manage'), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Check if the user being deleted has super_admin permission
+    const userToDelete = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { role: { select: { permissions: true, name: true } } },
+    });
+
+    if (!userToDelete) {
+      throw new NotFoundError('User', req.params.id);
+    }
+
+    // Prevent deletion of super admin users
+    if (userToDelete.role?.permissions?.includes('super_admin') ||
+        userToDelete.role?.name?.toLowerCase() === 'super admin') {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'CANNOT_DELETE_SUPER_ADMIN',
+          message: 'Super Admin users cannot be deleted',
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
     await prisma.user.update({
       where: { id: req.params.id },
       data: {
@@ -564,9 +588,9 @@ router.put('/users/:id/permissions', requirePermission('users:manage'), async (r
 
 /**
  * GET /admin/roles
- * List roles
+ * List roles - accessible by users with roles:manage OR users:manage permission
  */
-router.get('/roles', requirePermission('roles:manage'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/roles', requirePermission('roles:manage', 'users:manage'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { page, limit } = paginationSchema.parse(req.query);
     const skip = (page - 1) * limit;
@@ -717,6 +741,29 @@ router.patch('/roles/:id', requirePermission('roles:manage'), async (req: Reques
  */
 router.delete('/roles/:id', requirePermission('roles:manage'), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Check if this is the Super Admin role
+    const roleToDelete = await prisma.role.findUnique({
+      where: { id: req.params.id },
+      select: { name: true, permissions: true },
+    });
+
+    if (!roleToDelete) {
+      throw new NotFoundError('Role', req.params.id);
+    }
+
+    // Prevent deletion of Super Admin role
+    if (roleToDelete.permissions?.includes('super_admin') ||
+        roleToDelete.name?.toLowerCase() === 'super admin') {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'CANNOT_DELETE_SUPER_ADMIN_ROLE',
+          message: 'Super Admin role cannot be deleted',
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
     await prisma.role.delete({ where: { id: req.params.id } });
 
     await AuditService.log({
@@ -808,9 +855,9 @@ router.put('/roles/:id/permissions', requirePermission('roles:manage'), async (r
 
 /**
  * GET /admin/departments
- * List departments
+ * List departments - accessible by users with departments:manage OR users:manage permission
  */
-router.get('/departments', requirePermission('departments:manage'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/departments', requirePermission('departments:manage', 'users:manage'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { page, limit } = paginationSchema.parse(req.query);
     const skip = (page - 1) * limit;
@@ -960,6 +1007,30 @@ router.patch('/departments/:id', requirePermission('departments:manage'), async 
  */
 router.delete('/departments/:id', requirePermission('departments:manage'), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Check if this is the Super Admin department
+    const deptToDelete = await prisma.department.findUnique({
+      where: { id: req.params.id },
+      select: { name: true },
+    });
+
+    if (!deptToDelete) {
+      throw new NotFoundError('Department', req.params.id);
+    }
+
+    // Prevent deletion of Super Admin department
+    if (deptToDelete.name?.toLowerCase() === 'super admin' ||
+        deptToDelete.name?.toLowerCase() === 'superadmin' ||
+        deptToDelete.name?.toLowerCase() === 'administration') {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'CANNOT_DELETE_SUPER_ADMIN_DEPARTMENT',
+          message: 'Super Admin department cannot be deleted',
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
     await prisma.department.delete({ where: { id: req.params.id } });
 
     await AuditService.log({
@@ -1270,6 +1341,270 @@ router.post('/organization/test-storage', requirePermission('org:manage_settings
     }
   } catch (error) {
     return next(error);
+  }
+});
+
+// ============================================================================
+// Demo User Management Routes
+// ============================================================================
+
+/**
+ * GET /admin/demo-user
+ * Get demo user configuration
+ */
+router.get('/demo-user', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const org = await prisma.organization.findUnique({
+      where: { id: req.orgId! },
+      select: { settings: true },
+    });
+
+    const settings = org?.settings as Record<string, any> || {};
+    const demoUserConfig = settings.demoUser || { enabled: false, email: null, password: null, userId: null };
+
+    res.json({
+      success: true,
+      data: demoUserConfig,
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/demo-user/enable
+ * Enable demo user - creates a demo account that can only receive/respond to chats
+ */
+router.post('/demo-user/enable', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Find or create the demo department and role
+    let demoDept = await prisma.department.findFirst({
+      where: { orgId: req.orgId!, name: 'Demo' },
+    });
+
+    if (!demoDept) {
+      demoDept = await prisma.department.create({
+        data: {
+          orgId: req.orgId!,
+          name: 'Demo',
+          description: 'Demo users department',
+          rank: 0,
+        },
+      });
+    }
+
+    let demoRole = await prisma.role.findFirst({
+      where: { departmentId: demoDept.id, name: 'Demo User' },
+    });
+
+    if (!demoRole) {
+      demoRole = await prisma.role.create({
+        data: {
+          orgId: req.orgId!,
+          departmentId: demoDept.id,
+          name: 'Demo User',
+          description: 'Demo user role - can only receive and respond to chats',
+          rank: 0,
+          permissions: ['chat:respond'], // Limited permission - can only respond
+        },
+      });
+    }
+
+    // Generate demo user credentials
+    const demoEmail = `demo@${req.orgId}.demo.local`;
+    const demoPassword = generateSecureToken(12);
+    const passwordHash = await hashPassword(demoPassword);
+
+    // Find existing demo user or create one
+    let demoUser = await prisma.user.findFirst({
+      where: { orgId: req.orgId!, email: demoEmail },
+    });
+
+    if (!demoUser) {
+      demoUser = await prisma.user.create({
+        data: {
+          orgId: req.orgId!,
+          email: demoEmail,
+          username: 'demo_user',
+          displayName: 'Demo User',
+          passwordHash,
+          departmentId: demoDept.id,
+          roleId: demoRole.id,
+          status: 'ACTIVE',
+        },
+      });
+    } else {
+      // Update password
+      demoUser = await prisma.user.update({
+        where: { id: demoUser.id },
+        data: { passwordHash, status: 'ACTIVE' },
+      });
+    }
+
+    // Store demo user config in org settings
+    const org = await prisma.organization.findUnique({
+      where: { id: req.orgId! },
+      select: { settings: true },
+    });
+
+    const existingSettings = org?.settings as Record<string, any> || {};
+    const updatedSettings = {
+      ...existingSettings,
+      demoUser: {
+        enabled: true,
+        email: demoEmail,
+        password: demoPassword,
+        userId: demoUser.id,
+      },
+    };
+
+    await prisma.organization.update({
+      where: { id: req.orgId! },
+      data: { settings: updatedSettings },
+    });
+
+    await AuditService.log({
+      action: 'demo_user.enabled',
+      resourceType: 'organization',
+      resourceId: req.orgId!,
+      actorId: req.userId,
+      orgId: req.orgId,
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        enabled: true,
+        email: demoEmail,
+        password: demoPassword,
+        userId: demoUser.id,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/demo-user/disable
+ * Disable demo user
+ */
+router.post('/demo-user/disable', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Get current settings
+    const org = await prisma.organization.findUnique({
+      where: { id: req.orgId! },
+      select: { settings: true },
+    });
+
+    const existingSettings = org?.settings as Record<string, any> || {};
+    const demoUserId = existingSettings.demoUser?.userId;
+
+    // Deactivate the demo user if it exists
+    if (demoUserId) {
+      await prisma.user.update({
+        where: { id: demoUserId },
+        data: { status: 'DEACTIVATED' },
+      });
+    }
+
+    // Update settings
+    const updatedSettings = {
+      ...existingSettings,
+      demoUser: {
+        enabled: false,
+        email: existingSettings.demoUser?.email || null,
+        password: null,
+        userId: demoUserId,
+      },
+    };
+
+    await prisma.organization.update({
+      where: { id: req.orgId! },
+      data: { settings: updatedSettings },
+    });
+
+    await AuditService.log({
+      action: 'demo_user.disabled',
+      resourceType: 'organization',
+      resourceId: req.orgId!,
+      actorId: req.userId,
+      orgId: req.orgId,
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: { enabled: false },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/demo-user/regenerate
+ * Regenerate demo user password
+ */
+router.post('/demo-user/regenerate', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Get current settings
+    const org = await prisma.organization.findUnique({
+      where: { id: req.orgId! },
+      select: { settings: true },
+    });
+
+    const existingSettings = org?.settings as Record<string, any> || {};
+    const demoUserConfig = existingSettings.demoUser;
+
+    if (!demoUserConfig?.enabled || !demoUserConfig?.userId) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'DEMO_USER_NOT_ENABLED', message: 'Demo user is not enabled' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Generate new password
+    const newPassword = generateSecureToken(12);
+    const passwordHash = await hashPassword(newPassword);
+
+    // Update user password
+    await prisma.user.update({
+      where: { id: demoUserConfig.userId },
+      data: { passwordHash },
+    });
+
+    // Update settings with new password
+    const updatedSettings = {
+      ...existingSettings,
+      demoUser: {
+        ...demoUserConfig,
+        password: newPassword,
+      },
+    };
+
+    await prisma.organization.update({
+      where: { id: req.orgId! },
+      data: { settings: updatedSettings },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        enabled: true,
+        email: demoUserConfig.email,
+        password: newPassword,
+        userId: demoUserConfig.userId,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
   }
 });
 

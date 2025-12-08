@@ -21,7 +21,7 @@ import {
   Smartphone,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
-import { usersApi, authApi, filesApi, getErrorMessage } from '../lib/api';
+import { usersApi, authApi, filesApi, getErrorMessage, api } from '../lib/api';
 
 // Profile settings
 function ProfileSettings() {
@@ -203,6 +203,7 @@ function ProfileSettings() {
 
 // Security settings
 function SecuritySettings() {
+  const { user, setUser } = useAuthStore();
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showMfaSetup, setShowMfaSetup] = useState(false);
@@ -210,6 +211,18 @@ function SecuritySettings() {
   const [mfaQrCode, setMfaQrCode] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState('');
   const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+
+  // Check MFA status on mount
+  useQuery({
+    queryKey: ['user', 'me'],
+    queryFn: async () => {
+      const response = await authApi.me();
+      const userData = response.data.data as any;
+      setMfaEnabled(userData?.mfaEnabled || false);
+      return userData;
+    },
+  });
 
   const passwordSchema = z
     .object({
@@ -261,12 +274,16 @@ function SecuritySettings() {
   });
 
   const verifyMfaMutation = useMutation({
-    mutationFn: async (code: string) => {
+    mutationFn: async ({ code, secret }: { code: string; secret: string }) => {
+      // Send the secret along with the code for verification
       const response = await authApi.verifyMfa(code, 'TOTP');
-      return response.data.data;
+      // Override with custom request that includes secret
+      const customResponse = await api.post('/auth/mfa/verify', { code, secret, method: 'TOTP' });
+      return customResponse.data.data;
     },
     onSuccess: (data: any) => {
       setBackupCodes(data.backupCodes);
+      setMfaEnabled(true);
       toast.success('Two-factor authentication enabled');
     },
     onError: (error) => {
@@ -284,7 +301,11 @@ function SecuritySettings() {
       toast.error('Please enter a 6-digit code');
       return;
     }
-    verifyMfaMutation.mutate(mfaCode);
+    if (!mfaSecret) {
+      toast.error('MFA secret not found. Please restart the setup.');
+      return;
+    }
+    verifyMfaMutation.mutate({ code: mfaCode, secret: mfaSecret });
   };
 
   const copyToClipboard = (text: string) => {
@@ -397,7 +418,17 @@ function SecuritySettings() {
       <div>
         <h3 className="text-lg font-medium mb-4">Two-factor authentication</h3>
 
-        {!showMfaSetup ? (
+        {mfaEnabled && !showMfaSetup && !backupCodes ? (
+          <div className="card p-4 max-w-md">
+            <div className="flex items-center gap-2 mb-4 text-neon-success">
+              <Check className="w-5 h-5" />
+              <span className="font-medium">Two-factor authentication is enabled</span>
+            </div>
+            <p className="text-sm text-neon-text-muted">
+              Your account is protected with an authenticator app.
+            </p>
+          </div>
+        ) : !showMfaSetup ? (
           <div className="card p-4 max-w-md">
             <div className="flex items-center justify-between">
               <div>

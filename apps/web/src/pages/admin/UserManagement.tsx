@@ -28,18 +28,30 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { adminApi, getErrorMessage } from '../../lib/api';
 
-// User type
+// User type - matches API response from /admin/users
 interface User {
   id: string;
   email: string;
-  name: string;
+  displayName: string;
+  username?: string;
   avatarUrl?: string;
-  isActive: boolean;
-  mfaEnabled: boolean;
-  role: { id: string; name: string };
+  status: string;
+  presenceStatus?: string;
+  mfaEnabled?: boolean;
+  role?: { id: string; name: string };
   department?: { id: string; name: string };
-  lastLoginAt?: string;
+  lastActiveAt?: string;
   createdAt: string;
+}
+
+// Helper to get display name safely
+function getDisplayName(user: User): string {
+  return user.displayName || user.username || user.email || 'Unknown';
+}
+
+// Helper to check if user is active
+function isUserActive(user: User): boolean {
+  return user.status === 'ACTIVE';
 }
 
 // User form schema
@@ -82,7 +94,7 @@ function UserFormModal({
     ),
     defaultValues: {
       email: user?.email || '',
-      name: user?.name || '',
+      name: user?.displayName || '',
       roleId: user?.role?.id || '',
       departmentId: user?.department?.id || '',
     },
@@ -313,7 +325,7 @@ function DeleteConfirmModal({
           </div>
           <h3 className="text-lg font-semibold mb-2">Delete User</h3>
           <p className="text-neon-text-secondary mb-6">
-            Are you sure you want to delete <strong>{user.name}</strong>? This action cannot be undone.
+            Are you sure you want to delete <strong>{getDisplayName(user)}</strong>? This action cannot be undone.
           </p>
           <div className="flex gap-3">
             <button className="btn btn-ghost flex-1" onClick={onClose}>
@@ -563,13 +575,13 @@ export default function UserManagement() {
                     <div className="flex items-center gap-3">
                       <div className="avatar avatar-sm">
                         {user.avatarUrl ? (
-                          <img src={user.avatarUrl} alt={user.name} className="w-full h-full object-cover" />
+                          <img src={user.avatarUrl} alt={getDisplayName(user)} className="w-full h-full object-cover" />
                         ) : (
-                          <span>{user.name.charAt(0).toUpperCase()}</span>
+                          <span>{getDisplayName(user).charAt(0).toUpperCase()}</span>
                         )}
                       </div>
                       <div>
-                        <p className="font-medium">{user.name}</p>
+                        <p className="font-medium">{getDisplayName(user)}</p>
                         <p className="text-sm text-neon-text-muted">{user.email}</p>
                       </div>
                     </div>
@@ -581,13 +593,13 @@ export default function UserManagement() {
                     {user.department?.name || '-'}
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`badge ${user.isActive ? 'badge-success' : 'badge-error'}`}>
-                      {user.isActive ? 'Active' : 'Inactive'}
+                    <span className={`badge ${isUserActive(user) ? 'badge-success' : 'badge-error'}`}>
+                      {isUserActive(user) ? 'Active' : 'Inactive'}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-sm text-neon-text-muted">
-                    {user.lastLoginAt
-                      ? formatDistanceToNow(new Date(user.lastLoginAt), { addSuffix: true })
+                    {user.lastActiveAt
+                      ? formatDistanceToNow(new Date(user.lastActiveAt), { addSuffix: true })
                       : 'Never'}
                   </td>
                   <td className="px-4 py-3 text-right">
