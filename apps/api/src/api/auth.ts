@@ -18,6 +18,7 @@ import {
 } from '@neon/shared';
 import { authenticate, requireMfa } from '../middleware/auth';
 import * as AuthService from '../services/auth';
+import { setCache, getCache, deleteCache } from '../services/redis';
 
 const config = getConfig();
 const router = Router();
@@ -265,8 +266,9 @@ router.post('/mfa/setup', authenticate, async (req: Request, res: Response, next
       const secret = AuthService.generateTotpSecret();
       const qrCode = AuthService.generateTotpUri(req.user!.email, secret);
 
-      // Store secret temporarily (will be confirmed on verify)
-      // In production, encrypt and store in Redis with expiry
+      // Store secret temporarily in Redis with 10-minute expiry
+      const cacheKey = `mfa_setup:${req.userId}`;
+      await setCache(cacheKey, { secret, method }, 600); // 10 minutes
 
       res.json({
         success: true,
@@ -282,7 +284,11 @@ router.post('/mfa/setup', authenticate, async (req: Request, res: Response, next
     } else {
       // Email MFA - send code
       const code = AuthService.generateEmailCode();
-      // TODO: Store code and send email
+
+      // Store code temporarily in Redis
+      const cacheKey = `mfa_setup:${req.userId}`;
+      await setCache(cacheKey, { code, method }, 600); // 10 minutes
+      // TODO: Send email with code
 
       res.json({
         success: true,
@@ -306,15 +312,18 @@ router.post('/mfa/verify', authenticate, async (req: Request, res: Response, nex
   try {
     const { code, method, secret } = req.body;
 
-    // Get the pending MFA secret from the user or from the request
-    // In a full implementation, we'd store the secret temporarily in Redis
-    // For now, we'll get it from the request or verify against stored secret
-
     let mfaSecret = secret;
 
-    // If no secret provided, try to get the pending secret from cache or user
+    // Try to get the pending secret from Redis first (from setup step)
+    const cacheKey = `mfa_setup:${req.userId}`;
+    const cachedSetup = await getCache<{ secret?: string; code?: string; method: string }>(cacheKey);
+
+    if (!mfaSecret && cachedSetup?.secret) {
+      mfaSecret = cachedSetup.secret;
+    }
+
+    // If still no secret, check if user already has MFA secret (re-verification)
     if (!mfaSecret && req.user) {
-      // Check if user already has MFA secret (re-verification)
       const user = await prisma.user.findUnique({
         where: { id: req.userId },
         select: { mfaSecret: true, mfaEnabled: true },
@@ -356,6 +365,9 @@ router.post('/mfa/verify', authenticate, async (req: Request, res: Response, nex
         mfaBackupCodes: backupCodes,
       },
     });
+
+    // Clear the cached setup data
+    await deleteCache(cacheKey);
 
     return res.json({
       success: true,
