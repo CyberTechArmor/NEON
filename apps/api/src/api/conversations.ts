@@ -4,8 +4,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '@neon/database';
-import { createConversationSchema, updateConversationSchema, addParticipantsSchema, cursorPaginationSchema } from '@neon/shared';
-import { NotFoundError, ForbiddenError, ValidationError } from '@neon/shared';
+import { createConversationSchema, updateConversationSchema, addParticipantsSchema, cursorPaginationSchema, ValidationError, NotFoundError, ForbiddenError } from '@neon/shared';
 import { authenticate } from '../middleware/auth';
 import { canCommunicate, canFreeze } from '../services/permissions';
 import { AuditService } from '../services/audit';
@@ -316,6 +315,196 @@ router.delete('/:id/participants/:userId', async (req: Request, res: Response, n
       success: true,
       data: { message: isLeavingSelf ? 'Left conversation' : 'Participant removed' },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /conversations/:id/messages
+ * Get messages in a conversation
+ */
+router.get('/:id/messages', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { before, limit = '50' } = req.query;
+    const messageLimit = Math.min(parseInt(limit as string, 10) || 50, 100);
+
+    // Verify user is a participant
+    const participant = await prisma.conversationParticipant.findFirst({
+      where: {
+        conversationId: req.params.id,
+        userId: req.userId!,
+        leftAt: null,
+      },
+    });
+
+    if (!participant) {
+      throw new NotFoundError('Conversation', req.params.id);
+    }
+
+    const messages = await prisma.message.findMany({
+      where: {
+        conversationId: req.params.id,
+        deletedAt: null,
+        ...(before && { createdAt: { lt: new Date(before as string) } }),
+      },
+      include: {
+        sender: {
+          select: { id: true, displayName: true, avatarUrl: true },
+        },
+        replyTo: {
+          select: {
+            id: true,
+            content: true,
+            sender: { select: { id: true, displayName: true } },
+          },
+        },
+        reactions: {
+          include: {
+            user: { select: { id: true, displayName: true } },
+          },
+        },
+        files: {
+          include: {
+            file: { select: { id: true, name: true, mimeType: true, size: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: messageLimit + 1,
+    });
+
+    const hasMore = messages.length > messageLimit;
+    const data = hasMore ? messages.slice(0, -1) : messages;
+
+    // Update last read timestamp
+    await prisma.conversationParticipant.update({
+      where: { id: participant.id },
+      data: {
+        lastReadAt: new Date(),
+        lastReadMessageId: data[0]?.id,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: data.reverse(), // Return in chronological order
+      meta: {
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+        pagination: {
+          hasMore,
+          cursor: data.length > 0 ? data[0]!.createdAt.toISOString() : null,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /conversations/:id/messages
+ * Send a message to a conversation
+ */
+router.post('/:id/messages', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { content, replyToId, type = 'TEXT' } = req.body;
+
+    if (!content || typeof content !== 'string' || content.trim().length === 0) {
+      throw new ValidationError('Message content is required');
+    }
+
+    if (content.length > CHAT_LIMITS.MAX_MESSAGE_LENGTH) {
+      throw new ValidationError(`Message cannot exceed ${CHAT_LIMITS.MAX_MESSAGE_LENGTH} characters`);
+    }
+
+    // Verify user is a participant and can send messages
+    const participant = await prisma.conversationParticipant.findFirst({
+      where: {
+        conversationId: req.params.id,
+        userId: req.userId!,
+        leftAt: null,
+      },
+      include: {
+        conversation: {
+          select: { orgId: true, deletedAt: true },
+        },
+      },
+    });
+
+    if (!participant) {
+      throw new NotFoundError('Conversation', req.params.id);
+    }
+
+    if (participant.conversation.deletedAt) {
+      throw new ForbiddenError('This conversation has been deleted');
+    }
+
+    if (!participant.canSendMessages) {
+      throw new ForbiddenError('You cannot send messages in this conversation');
+    }
+
+    if (participant.isFrozen) {
+      throw new ForbiddenError('Your messages are frozen in this conversation');
+    }
+
+    // Verify conversation belongs to user's org
+    if (participant.conversation.orgId !== req.orgId) {
+      throw new ForbiddenError('Access denied');
+    }
+
+    // Create the message
+    const message = await prisma.message.create({
+      data: {
+        conversationId: req.params.id!,
+        senderId: req.userId!,
+        type: type as 'TEXT' | 'FILE' | 'SYSTEM',
+        content: content.trim(),
+        replyToId,
+      },
+      include: {
+        sender: {
+          select: { id: true, displayName: true, avatarUrl: true },
+        },
+        replyTo: {
+          select: {
+            id: true,
+            content: true,
+            sender: { select: { id: true, displayName: true } },
+          },
+        },
+      },
+    });
+
+    // Update conversation last message info
+    await prisma.conversation.update({
+      where: { id: req.params.id },
+      data: {
+        lastMessageAt: message.createdAt,
+        lastMessagePreview: content.trim().substring(0, 100),
+      },
+    });
+
+    // Log the message send for audit
+    await AuditService.log({
+      action: 'message.sent',
+      resourceType: 'message',
+      resourceId: message.id,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { conversationId: req.params.id },
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: message,
+      meta: {
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+      },
     });
   } catch (error) {
     next(error);
