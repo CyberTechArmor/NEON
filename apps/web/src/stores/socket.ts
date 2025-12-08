@@ -19,7 +19,7 @@ const getWsUrl = (): string => {
 
 interface PresenceUser {
   odId: string;
-  status: 'online' | 'away' | 'busy' | 'offline';
+  status: 'ONLINE' | 'AWAY' | 'DND' | 'OFFLINE' | 'online' | 'away' | 'busy' | 'offline';
   statusMessage?: string;
   lastSeen?: string;
 }
@@ -235,6 +235,8 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   updatePresence: (status, statusMessage) => {
     const { socket } = get();
     if (!socket) return;
-    socket.emit('presence:update', { status, statusMessage });
+    // Send uppercase status for backend compatibility
+    const normalizedStatus = status.toUpperCase() === 'BUSY' ? 'DND' : status.toUpperCase();
+    socket.emit('presence:update', { status: normalizedStatus, statusMessage });
   },
 }));
