@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import { useAuthStore } from './auth';
 import { useChatStore } from './chat';
+import { showMessageNotification, showTestAlertNotification } from './notifications';
 
 // Get WebSocket URL from runtime config (docker), build-time env, or fallback
 const getWsUrl = (): string => {
@@ -142,17 +143,26 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       const isOwnMessage = message.senderId === currentUserId;
       const isCurrentConversation = message.conversationId === currentConversationId;
 
-      if (!isOwnMessage && !isCurrentConversation) {
+      // Show notifications for messages not sent by current user
+      if (!isOwnMessage) {
         const senderName = message.sender?.displayName || message.sender?.name || 'Someone';
-        const messagePreview = message.content?.substring(0, 50) || '[Attachment]';
-        toast(
-          `${senderName}: ${messagePreview}${message.content?.length > 50 ? '...' : ''}`,
-          {
-            icon: '💬',
-            duration: 4000,
-            position: 'top-right',
-          }
-        );
+        const messageContent = message.content || '[Attachment]';
+
+        // Show in-app toast if not in the current conversation
+        if (!isCurrentConversation) {
+          const messagePreview = messageContent.substring(0, 50);
+          toast(
+            `${senderName}: ${messagePreview}${messageContent.length > 50 ? '...' : ''}`,
+            {
+              icon: '💬',
+              duration: 4000,
+              position: 'top-right',
+            }
+          );
+        }
+
+        // Show sound + browser notification (handled by notification store settings)
+        showMessageNotification(senderName, messageContent, message.conversationId);
       }
 
       // Update activity timestamp
@@ -278,6 +288,9 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         },
         lastActivityAt: Date.now(),
       });
+
+      // Play sound and show browser notification for test alerts
+      showTestAlertNotification(alert.title, alert.body);
     });
 
     // Test alert acknowledged on another device
