@@ -93,6 +93,7 @@ export async function authenticate(
         mfaEnabled: true,
         timezone: true,
         locale: true,
+        settings: true,
         department: { select: { name: true } },
         role: { select: { name: true, permissions: true } },
       },
@@ -110,6 +111,23 @@ export async function authenticate(
       throw new ForbiddenError('Account is suspended');
     }
 
+    // Combine role permissions with user-specific permissions from settings
+    const rolePermissions = user.role?.permissions ?? [];
+    const userSettings = user.settings as Record<string, unknown> | null;
+    const userPermissions = (userSettings?.permissions as string[]) || [];
+
+    // Combine all permissions
+    let allPermissions = [...new Set([...rolePermissions, ...userPermissions])];
+
+    // Check if user is super admin by role name (case insensitive)
+    const roleName = user.role?.name?.toLowerCase();
+    const isSuperAdminByRole = roleName === 'super admin' || roleName === 'superadmin';
+
+    // Ensure super_admin permission is included for super admin roles
+    if (isSuperAdminByRole && !allPermissions.includes('super_admin')) {
+      allPermissions = [...allPermissions, 'super_admin'];
+    }
+
     // Attach user to request
     req.user = {
       id: user.id,
@@ -125,7 +143,7 @@ export async function authenticate(
       roleName: user.role?.name ?? null,
       timezone: user.timezone,
       locale: user.locale,
-      permissions: user.role?.permissions ?? [],
+      permissions: allPermissions,
       mfaEnabled: user.mfaEnabled,
     };
 

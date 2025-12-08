@@ -11,7 +11,7 @@ import { AuditService } from '../services/audit';
 import { checkRedisHealth } from '../services/redis';
 import { getJobStatus, triggerJob } from '../jobs';
 import { hashPassword, generateSecureToken } from '../services/auth';
-import { S3Client, HeadBucketCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { S3Client, HeadBucketCommand, ListObjectsV2Command, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { clearOrgS3Cache } from '../services/s3';
 
 const router = Router();
@@ -1335,6 +1335,122 @@ router.post('/organization/test-storage', requirePermission('org:manage_settings
         data: {
           success: false,
           message: `Connection failed: ${errorCode} - ${errorMessage}`
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * POST /admin/organization/test-storage-file
+ * Test S3 storage by uploading, reading, and deleting a test file
+ */
+router.post('/organization/test-storage-file', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { endpoint, bucket, region, accessKeyId, secretAccessKey, forcePathStyle } = req.body;
+
+    if (!endpoint || !bucket) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_CONFIG',
+          message: 'Endpoint and bucket are required',
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Create a temporary S3 client with the provided config
+    const testClient = new S3Client({
+      endpoint,
+      region: region || 'us-east-1',
+      credentials: accessKeyId && secretAccessKey ? {
+        accessKeyId,
+        secretAccessKey,
+      } : undefined,
+      forcePathStyle: forcePathStyle !== false,
+    });
+
+    const testKey = `neon-test-file-${Date.now()}.txt`;
+    const testContent = `NEON Storage Test File\nCreated: ${new Date().toISOString()}\nOrganization: ${req.orgId}\nThis file was created to test S3 connectivity and can be safely deleted.`;
+
+    const steps: { step: string; success: boolean; message: string }[] = [];
+
+    try {
+      // Step 1: Upload test file
+      await testClient.send(new PutObjectCommand({
+        Bucket: bucket,
+        Key: testKey,
+        Body: testContent,
+        ContentType: 'text/plain',
+      }));
+      steps.push({ step: 'upload', success: true, message: 'Test file uploaded successfully' });
+
+      // Step 2: Read test file back
+      const getResponse = await testClient.send(new GetObjectCommand({
+        Bucket: bucket,
+        Key: testKey,
+      }));
+
+      const readContent = await getResponse.Body?.transformToString();
+      const contentMatches = readContent === testContent;
+      steps.push({
+        step: 'read',
+        success: contentMatches,
+        message: contentMatches ? 'Test file read successfully and content verified' : 'Test file read but content mismatch'
+      });
+
+      // Step 3: Delete test file
+      await testClient.send(new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: testKey,
+      }));
+      steps.push({ step: 'delete', success: true, message: 'Test file deleted successfully' });
+
+      const allSuccessful = steps.every(s => s.success);
+
+      return res.json({
+        success: true,
+        data: {
+          success: allSuccessful,
+          message: allSuccessful
+            ? 'All storage tests passed! Upload, read, and delete operations work correctly.'
+            : 'Some storage tests failed. Check the steps for details.',
+          steps,
+          testFile: {
+            key: testKey,
+            size: testContent.length,
+          },
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    } catch (s3Error: any) {
+      const errorMessage = s3Error.message || 'Unknown error';
+      const errorCode = s3Error.Code || s3Error.name || 'UNKNOWN';
+
+      // Try to clean up the test file if it exists
+      try {
+        await testClient.send(new DeleteObjectCommand({
+          Bucket: bucket,
+          Key: testKey,
+        }));
+      } catch {
+        // Ignore cleanup errors
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          success: false,
+          message: `Storage test failed: ${errorCode} - ${errorMessage}`,
+          steps,
+          error: {
+            code: errorCode,
+            message: errorMessage,
+          },
         },
         meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
       });

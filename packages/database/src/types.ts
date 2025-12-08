@@ -221,7 +221,7 @@ export interface ResolvedPermission {
   canCall: boolean;
   canViewPresence: boolean;
   requiresApproval: boolean;
-  source: 'user' | 'user_role' | 'role' | 'department' | 'default';
+  source: 'user' | 'user_role' | 'role' | 'department' | 'default' | 'super_admin';
   sourceId?: string;
 }
 

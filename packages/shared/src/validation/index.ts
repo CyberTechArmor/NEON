@@ -12,6 +12,12 @@ import { z } from 'zod';
 
 export const uuidSchema = z.string().uuid();
 
+// UUID schema that treats empty strings as undefined
+export const optionalUuidSchema = z.preprocess(
+  (val) => (val === '' || val === 'undefined' || val === null ? undefined : val),
+  z.string().uuid().optional()
+);
+
 export const emailSchema = z.string().email().max(255);
 
 export const passwordSchema = z
@@ -106,16 +112,22 @@ export const createUserSchema = z.object({
   username: usernameSchema.optional(),
   displayName: displayNameSchema,
   password: passwordSchema.optional(),
-  departmentId: uuidSchema.optional(),
-  roleId: uuidSchema.optional(),
+  departmentId: optionalUuidSchema,
+  roleId: optionalUuidSchema,
   tagIds: z.array(uuidSchema).optional(),
 });
+
+// UUID schema that treats empty strings as null (for update operations)
+const nullableUuidSchema = z.preprocess(
+  (val) => (val === '' || val === 'undefined' ? null : val),
+  z.string().uuid().nullable().optional()
+);
 
 export const updateUserSchema = z.object({
   displayName: displayNameSchema.optional(),
   username: usernameSchema.optional(),
-  departmentId: uuidSchema.optional().nullable(),
-  roleId: uuidSchema.optional().nullable(),
+  departmentId: nullableUuidSchema,
+  roleId: nullableUuidSchema,
   timezone: timezoneSchema.optional(),
   locale: localeSchema.optional(),
   tagIds: z.array(uuidSchema).optional(),
@@ -156,8 +168,14 @@ export const createDepartmentSchema = z.object({
   mfaMethods: z.array(z.enum(['TOTP', 'EMAIL'])).optional(),
 });
 
+// UUID schema that is required but handles empty strings gracefully
+const requiredUuidSchema = z.preprocess(
+  (val) => (val === '' || val === 'undefined' || val === null ? undefined : val),
+  z.string().uuid()
+);
+
 export const createRoleSchema = z.object({
-  departmentId: uuidSchema,
+  departmentId: requiredUuidSchema,
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
   rank: z.number().int().min(0).optional(),

@@ -11,9 +11,45 @@ import { getCache, setCache } from './redis';
 const CACHE_TTL = 300; // 5 minutes
 
 /**
+ * Check if a user has super_admin permission
+ */
+async function isSuperAdmin(userId: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      role: { select: { permissions: true, name: true } },
+      settings: true,
+    },
+  });
+
+  if (!user) return false;
+
+  // Check role permissions
+  if (user.role?.permissions?.includes('super_admin')) {
+    return true;
+  }
+
+  // Check role name
+  if (user.role?.name?.toLowerCase() === 'super admin' ||
+      user.role?.name?.toLowerCase() === 'superadmin') {
+    return true;
+  }
+
+  // Check user-specific permissions stored in settings
+  const settings = user.settings as Record<string, unknown> | null;
+  const userPermissions = (settings?.permissions as string[]) || [];
+  if (userPermissions.includes('super_admin')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Resolve permission between two users
  *
  * Resolution order (first match wins):
+ * 0. Super admin bypass - super admins can communicate with anyone
  * 1. User ↔ User explicit
  * 2. User ↔ Role explicit
  * 3. Role ↔ Role explicit
@@ -24,6 +60,18 @@ export async function resolvePermission(
   context: PermissionContext
 ): Promise<ResolvedPermission> {
   const { sourceUserId, targetUserId, orgId } = context;
+
+  // 0. Super admin bypass - super admins can communicate with anyone
+  const sourceIsSuperAdmin = await isSuperAdmin(sourceUserId);
+  if (sourceIsSuperAdmin) {
+    return {
+      canChat: true,
+      canCall: true,
+      canViewPresence: true,
+      requiresApproval: false,
+      source: 'super_admin',
+    };
+  }
 
   // Check cache
   const cacheKey = `perm:${sourceUserId}:${targetUserId}`;
