@@ -333,10 +333,30 @@ export function AdminSettings() {
                   )}
                 </button>
                 {connectionStatus === 'success' && (
-                  <span className="flex items-center gap-2 text-neon-success">
-                    <Check className="w-4 h-4" />
-                    Connection successful
-                  </span>
+                  <>
+                    <span className="flex items-center gap-2 text-neon-success">
+                      <Check className="w-4 h-4" />
+                      Connection successful
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => saveMutation.mutate({ storage: formData })}
+                      disabled={saveMutation.isPending}
+                    >
+                      {saveMutation.isPending ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4" />
+                          <span>Save S3 Settings</span>
+                        </>
+                      )}
+                    </button>
+                  </>
                 )}
                 {connectionStatus === 'error' && (
                   <span className="flex items-center gap-2 text-neon-error">

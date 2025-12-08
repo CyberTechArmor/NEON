@@ -116,10 +116,10 @@ export const authApi = {
 
   me: () => api.get<ApiResponse<unknown>>('/auth/me'),
 
-  setupMfa: (type?: 'TOTP' | 'SMS') => api.post<ApiResponse<{ secret: string; qrCode: string }>>('/auth/mfa/setup', { type: type || 'TOTP' }),
+  setupMfa: (method?: 'TOTP' | 'EMAIL') => api.post<ApiResponse<{ secret: string; qrCode: string }>>('/auth/mfa/setup', { method: method || 'TOTP' }),
 
-  verifyMfa: (code: string, type?: 'TOTP' | 'SMS', userId?: string) =>
-    api.post<ApiResponse<{ user: unknown; accessToken: string; refreshToken: string; backupCodes?: string[] }>>('/auth/mfa/verify', { code, type: type || 'TOTP', userId }),
+  verifyMfa: (code: string, method?: 'TOTP' | 'EMAIL', userId?: string) =>
+    api.post<ApiResponse<{ user: unknown; accessToken: string; refreshToken: string; backupCodes?: string[] }>>('/auth/mfa/verify', { code, method: method || 'TOTP', userId }),
 
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post('/auth/password', { currentPassword, newPassword }),
@@ -262,7 +262,13 @@ export const adminApi = {
     get: (id: string) => api.get<ApiResponse<unknown>>(`/admin/users/${id}`),
 
     create: (data: { email: string; name: string; password: string; roleId: string; departmentId?: string }) =>
-      api.post<ApiResponse<unknown>>('/admin/users', data),
+      api.post<ApiResponse<unknown>>('/admin/users', {
+        email: data.email,
+        displayName: data.name,
+        password: data.password,
+        roleId: data.roleId,
+        departmentId: data.departmentId,
+      }),
 
     update: (id: string, data: { name?: string; email?: string; roleId?: string; departmentId?: string; isActive?: boolean }) =>
       api.patch<ApiResponse<unknown>>(`/admin/users/${id}`, data),
