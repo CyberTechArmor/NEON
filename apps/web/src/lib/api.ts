@@ -116,10 +116,10 @@ export const authApi = {
 
   me: () => api.get<ApiResponse<unknown>>('/auth/me'),
 
-  setupMfa: () => api.post<ApiResponse<{ secret: string; qrCode: string }>>('/auth/mfa/setup'),
+  setupMfa: (type?: 'TOTP' | 'SMS') => api.post<ApiResponse<{ secret: string; qrCode: string }>>('/auth/mfa/setup', { type: type || 'TOTP' }),
 
-  verifyMfa: (userId: string, code: string) =>
-    api.post<ApiResponse<{ user: unknown; accessToken: string; refreshToken: string }>>('/auth/mfa/verify', { userId, code }),
+  verifyMfa: (code: string, type?: 'TOTP' | 'SMS', userId?: string) =>
+    api.post<ApiResponse<{ user: unknown; accessToken: string; refreshToken: string; backupCodes?: string[] }>>('/auth/mfa/verify', { code, type: type || 'TOTP', userId }),
 
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post('/auth/password', { currentPassword, newPassword }),
@@ -218,6 +218,11 @@ export const filesApi = {
     api.get<ApiResponse<{ downloadUrl: string }>>(`/files/${fileId}/download-url`),
 
   delete: (fileId: string) => api.delete(`/files/${fileId}`),
+
+  upload: (formData: FormData) =>
+    api.post<ApiResponse<{ url: string; fileId: string }>>('/files/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
 };
 
 export const notificationsApi = {
@@ -392,6 +397,18 @@ export const adminApi = {
     getSettings: () => api.get<ApiResponse<unknown>>('/admin/organization/settings'),
 
     updateSettings: (settings: Record<string, unknown>) =>
-      api.patch('/admin/organization/settings', settings),
+      api.patch<ApiResponse<unknown>>('/admin/organization/settings', settings),
+
+    testStorageConnection: (config: Record<string, unknown>) =>
+      api.post<ApiResponse<{ success: boolean; message?: string }>>('/admin/organization/test-storage', config),
   },
+
+  // Top-level convenience methods for settings
+  getSettings: () => api.get<ApiResponse<unknown>>('/admin/organization/settings'),
+
+  updateSettings: (settings: Record<string, unknown>) =>
+    api.patch<ApiResponse<unknown>>('/admin/organization/settings', settings),
+
+  testStorageConnection: (config: Record<string, unknown>) =>
+    api.post<ApiResponse<{ success: boolean; message?: string }>>('/admin/organization/test-storage', config),
 };
