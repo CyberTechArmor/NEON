@@ -59,6 +59,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 
 /**
  * Generate access token
+ * Returns both the token and the unique jti for session storage
  */
 export function generateAccessToken(user: {
   id: string;
@@ -67,7 +68,8 @@ export function generateAccessToken(user: {
   roleId: string | null;
   departmentId: string | null;
   permissions: string[];
-}): string {
+}): { token: string; jti: string } {
+  const jti = randomBytes(16).toString('hex');
   const payload: Omit<AccessTokenPayload, 'iat' | 'exp'> = {
     sub: user.id,
     org: user.orgId,
@@ -76,29 +78,35 @@ export function generateAccessToken(user: {
     role: user.roleId,
     dept: user.departmentId,
     perms: user.permissions,
-    jti: randomBytes(16).toString('hex'),
+    jti,
   };
 
-  return jwt.sign(payload, config.auth.jwtSecret, {
+  const token = jwt.sign(payload, config.auth.jwtSecret, {
     expiresIn: config.auth.jwtAccessExpiresIn as jwt.SignOptions['expiresIn'],
   });
+
+  return { token, jti };
 }
 
 /**
  * Generate refresh token
+ * Returns both the token and the unique jti for session storage
  */
-export function generateRefreshToken(userId: string, deviceId?: string): string {
+export function generateRefreshToken(userId: string, deviceId?: string): { token: string; jti: string } {
+  const jti = randomBytes(16).toString('hex');
   const payload: Omit<RefreshTokenPayload, 'iat' | 'exp'> = {
     sub: userId,
     org: '', // Not needed for refresh
     type: 'refresh',
     device: deviceId,
-    jti: randomBytes(16).toString('hex'),
+    jti,
   };
 
-  return jwt.sign(payload, config.auth.jwtSecret, {
+  const token = jwt.sign(payload, config.auth.jwtSecret, {
     expiresIn: config.auth.jwtRefreshExpiresIn as jwt.SignOptions['expiresIn'],
   });
+
+  return { token, jti };
 }
 
 /**
@@ -121,6 +129,24 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload {
       throw new UnauthorizedError('Invalid refresh token');
     }
     throw error;
+  }
+}
+
+/**
+ * Extract jti from access token (without full verification, for logout)
+ */
+export function extractTokenJti(token: string): string | null {
+  try {
+    const payload = jwt.verify(token, config.auth.jwtSecret) as AccessTokenPayload;
+    return payload.jti || null;
+  } catch {
+    // Even if token is expired, try to decode it
+    try {
+      const decoded = jwt.decode(token) as AccessTokenPayload | null;
+      return decoded?.jti || null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -289,7 +315,7 @@ export async function login(
   }
 
   // Generate tokens
-  const accessToken = generateAccessToken({
+  const { token: accessToken, jti: accessJti } = generateAccessToken({
     id: user.id,
     orgId: user.orgId,
     email: user.email,
@@ -298,14 +324,14 @@ export async function login(
     permissions: user.role?.permissions ?? [],
   });
 
-  const refreshToken = generateRefreshToken(user.id, deviceFingerprint);
+  const { token: refreshToken, jti: refreshJti } = generateRefreshToken(user.id, deviceFingerprint);
 
-  // Create session
+  // Create session - store unique jti values to allow multiple sessions per user
   const session = await prisma.session.create({
     data: {
       userId: user.id,
-      token: accessToken.substring(0, 50), // Store prefix for identification
-      refreshToken: refreshToken.substring(0, 50),
+      token: accessJti, // Store unique jti for session identification
+      refreshToken: refreshJti, // Store unique jti for refresh token lookup
       userAgent,
       ipAddress,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
@@ -385,11 +411,11 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
     throw new ForbiddenError('Account is not active');
   }
 
-  // Verify session exists
+  // Verify session exists using the jti from the refresh token payload
   const session = await prisma.session.findFirst({
     where: {
       userId: user.id,
-      refreshToken: refreshToken.substring(0, 50),
+      refreshToken: payload.jti, // Look up by jti stored in session
       revokedAt: null,
     },
   });
@@ -399,7 +425,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
   }
 
   // Generate new access token
-  const accessToken = generateAccessToken({
+  const { token: accessToken, jti: accessJti } = generateAccessToken({
     id: user.id,
     orgId: user.orgId,
     email: user.email,
@@ -408,10 +434,13 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
     permissions: user.role?.permissions ?? [],
   });
 
-  // Update session activity
+  // Update session with new access token jti and activity timestamp
   await prisma.session.update({
     where: { id: session.id },
-    data: { lastActivityAt: new Date() },
+    data: {
+      token: accessJti, // Update with new access token's jti
+      lastActivityAt: new Date(),
+    },
   });
 
   const expiresAt = new Date();
@@ -431,13 +460,19 @@ export async function logout(
   token: string,
   options: { ipAddress?: string; userAgent?: string } = {}
 ): Promise<void> {
-  const session = await prisma.session.findFirst({
-    where: {
-      userId,
-      token: token.substring(0, 50),
-      revokedAt: null,
-    },
-  });
+  // Extract jti from the token to find the session
+  const jti = extractTokenJti(token);
+
+  let session = null;
+  if (jti) {
+    session = await prisma.session.findFirst({
+      where: {
+        userId,
+        token: jti, // Look up by jti stored in session
+        revokedAt: null,
+      },
+    });
+  }
 
   if (session) {
     await prisma.session.update({
