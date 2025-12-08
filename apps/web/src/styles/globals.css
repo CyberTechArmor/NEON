@@ -255,12 +255,19 @@
 
   /* Message bubble */
   .message-bubble {
-    @apply max-w-[70%] px-3 py-2 rounded-lg;
+    @apply px-4 py-2.5 rounded-2xl;
+    max-width: min(70%, 480px);
+    min-width: 60px;
+    /* Improved word breaking - only break on spaces or hyphens */
     word-wrap: break-word;
-    overflow-wrap: break-word;
-    word-break: break-word;
+    overflow-wrap: anywhere;
+    /* Only break words if they exceed the container width */
+    word-break: normal;
+    /* Enable hyphenation for supported languages */
     hyphens: auto;
-    min-width: 0;
+    -webkit-hyphens: auto;
+    /* Ensure proper text rendering */
+    white-space: pre-wrap;
   }
 
   .message-bubble-own {
@@ -269,6 +276,11 @@
 
   .message-bubble-other {
     @apply bg-neon-surface-hover text-white;
+  }
+
+  /* Status indicator with inactive state */
+  .status-inactive {
+    @apply bg-neon-warning/60;
   }
 
   /* Call controls */

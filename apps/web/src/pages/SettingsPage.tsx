@@ -19,8 +19,12 @@ import {
   X,
   Copy,
   Smartphone,
+  AlertTriangle,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
+import { useSocketStore } from '../stores/socket';
 import { usersApi, authApi, filesApi, getErrorMessage, api } from '../lib/api';
 
 // Profile settings
@@ -636,6 +640,7 @@ function SecuritySettings() {
 
 // Notification settings
 function NotificationSettings() {
+  const { isConnected, lastConnectedAt, lastActivityAt, sendTestAlert, activeTestAlert, acknowledgeTestAlert } = useSocketStore();
   const [settings, setSettings] = useState({
     emailMessages: true,
     emailMentions: true,
@@ -643,17 +648,97 @@ function NotificationSettings() {
     pushCalls: true,
     soundEnabled: true,
   });
+  const [isSendingAlert, setIsSendingAlert] = useState(false);
 
   const toggleSetting = (key: keyof typeof settings) => {
     setSettings({ ...settings, [key]: !settings[key] });
     toast.success('Settings updated');
   };
 
+  const handleSendTestAlert = () => {
+    setIsSendingAlert(true);
+    sendTestAlert();
+    toast.success('Test alert sent to all your devices');
+    setTimeout(() => setIsSendingAlert(false), 1000);
+  };
+
+  // Calculate connection status
+  const getConnectionStatus = () => {
+    if (!isConnected) {
+      return { status: 'Disconnected', color: 'text-neon-error', icon: WifiOff };
+    }
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    if (lastActivityAt && lastActivityAt < fiveMinutesAgo) {
+      return { status: 'Inactive', color: 'text-neon-warning', icon: Wifi };
+    }
+    return { status: 'Active', color: 'text-neon-success', icon: Wifi };
+  };
+
+  const connectionStatus = getConnectionStatus();
+  const ConnectionIcon = connectionStatus.icon;
+
   return (
     <div>
       <h2 className="text-xl font-semibold mb-6">Notifications</h2>
 
       <div className="space-y-6 max-w-md">
+        {/* Connection Status */}
+        <div>
+          <h3 className="text-lg font-medium mb-4">Connection Status</h3>
+          <div className="card p-4">
+            <div className="flex items-center gap-3">
+              <ConnectionIcon className={`w-6 h-6 ${connectionStatus.color}`} />
+              <div>
+                <p className={`font-medium ${connectionStatus.color}`}>
+                  {connectionStatus.status}
+                </p>
+                <p className="text-sm text-neon-text-muted">
+                  {isConnected
+                    ? lastActivityAt
+                      ? `Last activity: ${new Date(lastActivityAt).toLocaleTimeString()}`
+                      : 'Connected to real-time server'
+                    : 'Not connected to real-time server'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Test Alerts */}
+        <div>
+          <h3 className="text-lg font-medium mb-4">Test Alerts</h3>
+          <div className="card p-4">
+            <div className="flex items-start gap-4">
+              <AlertTriangle className="w-6 h-6 text-neon-warning flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-medium mb-1">Send Test Alert</p>
+                <p className="text-sm text-neon-text-muted mb-4">
+                  Send a test alert to all your logged-in devices. The alert will appear on all devices until acknowledged from any one of them.
+                </p>
+                <button
+                  className="btn btn-secondary"
+                  onClick={handleSendTestAlert}
+                  disabled={isSendingAlert || !isConnected}
+                >
+                  {isSendingAlert ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Sending...</span>
+                    </>
+                  ) : (
+                    <span>Send Test Alert</span>
+                  )}
+                </button>
+                {!isConnected && (
+                  <p className="text-xs text-neon-error mt-2">
+                    Connect to the server to send test alerts
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Email notifications */}
         <div>
           <h3 className="text-lg font-medium mb-4">Email notifications</h3>

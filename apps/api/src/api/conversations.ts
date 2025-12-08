@@ -36,14 +36,33 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
             },
           },
         },
+        messages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          where: { deletedAt: null },
+          include: {
+            sender: {
+              select: { id: true, displayName: true },
+            },
+          },
+        },
       },
       orderBy: { lastMessageAt: 'desc' },
       take: limit + 1,
       ...(cursor && { cursor: { id: cursor }, skip: 1 }),
     });
 
-    const hasMore = conversations.length > limit;
-    const data = hasMore ? conversations.slice(0, -1) : conversations;
+    // Transform to include lastMessage properly
+    const transformedConversations = conversations.map((conv) => {
+      const { messages, ...rest } = conv;
+      return {
+        ...rest,
+        lastMessage: messages[0] || null,
+      };
+    });
+
+    const hasMore = transformedConversations.length > limit;
+    const data = hasMore ? transformedConversations.slice(0, -1) : transformedConversations;
 
     res.json({
       success: true,
