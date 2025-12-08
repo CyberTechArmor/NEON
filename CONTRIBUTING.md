@@ -335,6 +335,7 @@ The Docker build follows a specific order. Errors at one stage will fail the ent
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `TS7030: Not all code paths return a value` | Missing `return` in catch block | Add `return` before `next(error)` |
+| `TS2345: Argument of type '"event:name"' is not assignable` | Socket event not in type definitions | Add event to `ClientToServerEvents`/`ServerToClientEvents` in `packages/shared/src/types/events.ts` |
 | `Cannot find module '@neon/shared'` | Package not built | Ensure build order is correct |
 | `Prisma Client not generated` | Missing prisma generate | Run generate before build |
 | `Module not found: @prisma/client` | Prisma not generated | Add prisma generate step |
@@ -551,6 +552,88 @@ const otherUser = useMemo(() =>
   [participants, userId]
 );
 ```
+
+### Issue: WebSocket Event Type Mismatch (TS2345)
+
+**Symptom:** TypeScript build fails with errors like:
+```
+error TS2345: Argument of type '"event:name"' is not assignable to parameter of type 'ReservedOrUserEventNames<SocketReservedEventsMap, ClientToServerEvents>'.
+```
+
+**Cause:** New socket events were added to the implementation (e.g., `apps/api/src/socket/index.ts`) but not to the type definitions in `packages/shared/src/types/events.ts`.
+
+**Example (from commit 650a19a):**
+The socket server used string literals for test alert events:
+```typescript
+// Bad: Using string literals instead of typed constants
+socket.on('test:alert:send', async (data) => { ... });
+io.emit('test:alert', alert);
+```
+
+But `ClientToServerEvents` and `ServerToClientEvents` interfaces didn't include these events.
+
+**Solution:**
+1. Add event constants to `SocketEvents` in `packages/shared/src/types/events.ts`:
+```typescript
+export const SocketEvents = {
+  // ... existing events
+  TEST_ALERT_SEND: 'test:alert:send',
+  TEST_ALERT: 'test:alert',
+  TEST_ALERT_ACKNOWLEDGE: 'test:alert:acknowledge',
+  TEST_ALERT_ACKNOWLEDGED: 'test:alert:acknowledged',
+} as const;
+```
+
+2. Add client-to-server events to `ClientToServerEvents`:
+```typescript
+export interface ClientToServerEvents {
+  // ... existing events
+  [SocketEvents.TEST_ALERT_SEND]: (data: TestAlertSendPayload) => void;
+  [SocketEvents.TEST_ALERT_ACKNOWLEDGE]: (data: TestAlertAcknowledgePayload) => void;
+}
+```
+
+3. Add server-to-client events to `ServerToClientEvents`:
+```typescript
+export interface ServerToClientEvents {
+  // ... existing events
+  [SocketEvents.TEST_ALERT]: (alert: TestAlertPayload) => void;
+  [SocketEvents.TEST_ALERT_ACKNOWLEDGED]: (data: TestAlertAcknowledgePayload) => void;
+}
+```
+
+4. Add payload type definitions:
+```typescript
+export interface TestAlertSendPayload {
+  title: string;
+  body: string;
+}
+
+export interface TestAlertPayload {
+  id: string;
+  title: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface TestAlertAcknowledgePayload {
+  id: string;
+}
+```
+
+5. Update implementation to use typed constants:
+```typescript
+// Good: Using typed constants
+socket.on(SocketEvents.TEST_ALERT_SEND, async (data) => { ... });
+io.emit(SocketEvents.TEST_ALERT, alert);
+```
+
+**Prevention:**
+1. Always add new socket events to `SocketEvents` constant first
+2. Update `ClientToServerEvents` for client → server events
+3. Update `ServerToClientEvents` for server → client events
+4. Define payload interfaces for type safety
+5. Use `SocketEvents.EVENT_NAME` constants instead of string literals
 
 ---
 
