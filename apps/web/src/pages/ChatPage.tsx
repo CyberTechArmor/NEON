@@ -19,12 +19,268 @@ import {
   Check,
   Loader2,
   MessageSquare,
+  Users,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useChatStore } from '../stores/chat';
 import { useSocketStore } from '../stores/socket';
 import { useAuthStore } from '../stores/auth';
-import { conversationsApi, messagesApi, getErrorMessage } from '../lib/api';
+import { conversationsApi, messagesApi, usersApi, getErrorMessage } from '../lib/api';
+
+interface UserForChat {
+  id: string;
+  displayName: string;
+  email: string;
+  avatarUrl?: string;
+}
+
+// New chat modal component
+function NewChatModal({
+  isOpen,
+  onClose,
+  onCreateConversation,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onCreateConversation: (conversationId: string) => void;
+}) {
+  const [chatType, setChatType] = useState<'direct' | 'group'>('direct');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedUsers, setSelectedUsers] = useState<UserForChat[]>([]);
+  const [groupName, setGroupName] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const { user: currentUser } = useAuthStore();
+
+  // Fetch users for selection
+  const { data: users, isLoading: isLoadingUsers } = useQuery({
+    queryKey: ['users-search', searchQuery],
+    queryFn: async () => {
+      const response = await usersApi.list({ search: searchQuery, limit: 20 });
+      return (response.data.data || []).filter(
+        (u: UserForChat) => u.id !== currentUser?.id
+      ) as UserForChat[];
+    },
+    enabled: isOpen,
+  });
+
+  const handleCreateConversation = async () => {
+    if (selectedUsers.length === 0) {
+      toast.error('Please select at least one user');
+      return;
+    }
+
+    if (chatType === 'group' && !groupName.trim()) {
+      toast.error('Please enter a group name');
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const response = await conversationsApi.create({
+        type: chatType === 'direct' ? 'DIRECT' : 'GROUP',
+        participantIds: selectedUsers.map((u) => u.id),
+        name: chatType === 'group' ? groupName.trim() : undefined,
+      });
+
+      const conversationId = response.data.data?.id;
+      if (conversationId) {
+        onCreateConversation(conversationId);
+      }
+      onClose();
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const toggleUserSelection = (user: UserForChat) => {
+    if (chatType === 'direct') {
+      // Direct message - only one user allowed
+      setSelectedUsers([user]);
+    } else {
+      // Group chat - multiple users allowed
+      if (selectedUsers.find((u) => u.id === user.id)) {
+        setSelectedUsers(selectedUsers.filter((u) => u.id !== user.id));
+      } else {
+        setSelectedUsers([...selectedUsers, user]);
+      }
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-neon-surface border border-neon-border rounded-lg shadow-xl w-full max-w-md">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-neon-border">
+          <h2 className="text-lg font-semibold">New Conversation</h2>
+          <button className="btn btn-icon btn-ghost btn-sm" onClick={onClose}>
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-4">
+          {/* Chat type toggle */}
+          <div className="flex gap-2 mb-4">
+            <button
+              className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+                chatType === 'direct'
+                  ? 'bg-neon-accent text-white'
+                  : 'bg-neon-surface-hover text-neon-text-muted hover:text-white'
+              }`}
+              onClick={() => {
+                setChatType('direct');
+                setSelectedUsers(selectedUsers.slice(0, 1));
+              }}
+            >
+              Direct Message
+            </button>
+            <button
+              className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+                chatType === 'group'
+                  ? 'bg-neon-accent text-white'
+                  : 'bg-neon-surface-hover text-neon-text-muted hover:text-white'
+              }`}
+              onClick={() => setChatType('group')}
+            >
+              Group Chat
+            </button>
+          </div>
+
+          {/* Group name input (for group chat) */}
+          {chatType === 'group' && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">Group Name</label>
+              <input
+                type="text"
+                className="input"
+                placeholder="Enter group name..."
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Selected users */}
+          {selectedUsers.length > 0 && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">Selected</label>
+              <div className="flex flex-wrap gap-2">
+                {selectedUsers.map((user) => (
+                  <span
+                    key={user.id}
+                    className="inline-flex items-center gap-1 px-2 py-1 bg-neon-surface-hover rounded-full text-sm"
+                  >
+                    {user.displayName}
+                    <button
+                      className="hover:text-neon-error"
+                      onClick={() => toggleUserSelection(user)}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* User search */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-2">
+              {chatType === 'direct' ? 'Select User' : 'Add Participants'}
+            </label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neon-text-muted" />
+              <input
+                type="text"
+                className="input pl-10"
+                placeholder="Search users..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* User list */}
+          <div className="max-h-[200px] overflow-y-auto space-y-1">
+            {isLoadingUsers ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="w-6 h-6 animate-spin text-neon-text-muted" />
+              </div>
+            ) : !users?.length ? (
+              <p className="text-center text-neon-text-muted py-4">
+                {searchQuery ? 'No users found' : 'Start typing to search'}
+              </p>
+            ) : (
+              users.map((user) => {
+                const isSelected = selectedUsers.some((u) => u.id === user.id);
+                return (
+                  <button
+                    key={user.id}
+                    className={`w-full flex items-center gap-3 p-2 rounded-lg text-left transition-colors ${
+                      isSelected
+                        ? 'bg-neon-accent/20 border border-neon-accent'
+                        : 'hover:bg-neon-surface-hover'
+                    }`}
+                    onClick={() => toggleUserSelection(user)}
+                  >
+                    <div className="avatar avatar-sm">
+                      {user.avatarUrl ? (
+                        <img
+                          src={user.avatarUrl}
+                          alt={user.displayName}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span>{user.displayName?.charAt(0).toUpperCase()}</span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{user.displayName}</p>
+                      <p className="text-xs text-neon-text-muted truncate">
+                        {user.email}
+                      </p>
+                    </div>
+                    {isSelected && (
+                      <Check className="w-5 h-5 text-neon-accent flex-shrink-0" />
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-3 p-4 border-t border-neon-border">
+          <button className="btn btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={handleCreateConversation}
+            disabled={selectedUsers.length === 0 || isCreating}
+          >
+            {isCreating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Creating...</span>
+              </>
+            ) : (
+              <span>
+                {chatType === 'direct' ? 'Start Chat' : 'Create Group'}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Conversation list item component
 function ConversationItem({
@@ -622,6 +878,16 @@ export default function ChatPage() {
           </div>
         )}
       </div>
+
+      {/* New chat modal */}
+      <NewChatModal
+        isOpen={showNewChat}
+        onClose={() => setShowNewChat(false)}
+        onCreateConversation={(conversationId) => {
+          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+          navigate(`/chat/${conversationId}`);
+        }}
+      />
     </div>
   );
 }

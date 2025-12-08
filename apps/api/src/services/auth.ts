@@ -391,15 +391,18 @@ export async function login(
  */
 export async function refreshAccessToken(refreshToken: string): Promise<{
   accessToken: string;
+  refreshToken: string;
   expiresAt: string;
+  user: AuthUser;
 }> {
   const payload = verifyRefreshToken(refreshToken);
 
-  // Find user
+  // Find user with full details
   const user = await prisma.user.findUnique({
     where: { id: payload.sub },
     include: {
-      role: { select: { permissions: true } },
+      role: { select: { name: true, permissions: true } },
+      department: { select: { name: true } },
     },
   });
 
@@ -434,11 +437,15 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
     permissions: user.role?.permissions ?? [],
   });
 
-  // Update session with new access token jti and activity timestamp
+  // Generate new refresh token for rotation
+  const { token: newRefreshToken, jti: newRefreshJti } = generateRefreshToken(user.id);
+
+  // Update session with new tokens and activity timestamp
   await prisma.session.update({
     where: { id: session.id },
     data: {
-      token: accessJti, // Update with new access token's jti
+      token: accessJti,
+      refreshToken: newRefreshJti,
       lastActivityAt: new Date(),
     },
   });
@@ -446,9 +453,29 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
   const expiresAt = new Date();
   expiresAt.setMinutes(expiresAt.getMinutes() + 15);
 
+  const authUser: AuthUser = {
+    id: user.id,
+    orgId: user.orgId,
+    email: user.email,
+    username: user.username,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    status: user.status,
+    departmentId: user.departmentId,
+    roleId: user.roleId,
+    departmentName: user.department?.name ?? null,
+    roleName: user.role?.name ?? null,
+    timezone: user.timezone,
+    locale: user.locale,
+    permissions: user.role?.permissions ?? [],
+    mfaEnabled: user.mfaEnabled,
+  };
+
   return {
     accessToken,
+    refreshToken: newRefreshToken,
     expiresAt: expiresAt.toISOString(),
+    user: authUser,
   };
 }
 

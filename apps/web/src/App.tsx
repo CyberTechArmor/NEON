@@ -13,6 +13,7 @@ import MFAPage from './pages/auth/MFAPage';
 import ChatPage from './pages/ChatPage';
 import CallPage from './pages/CallPage';
 import MeetingPage from './pages/MeetingPage';
+import MeetingsPage from './pages/MeetingsPage';
 import SettingsPage from './pages/SettingsPage';
 import AdminPage from './pages/AdminPage';
 
@@ -114,6 +115,7 @@ export default function App() {
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:conversationId" element={<ChatPage />} />
+        <Route path="meetings" element={<MeetingsPage />} />
         <Route path="call/:callId" element={<CallPage />} />
         <Route path="meeting/:meetingId" element={<MeetingPage />} />
         <Route path="settings/*" element={<SettingsPage />} />

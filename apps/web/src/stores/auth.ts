@@ -6,6 +6,7 @@ interface User {
   id: string;
   email: string;
   name: string;
+  username?: string;
   avatarUrl?: string;
   role: {
     id: string;
@@ -17,6 +18,27 @@ interface User {
   };
   permissions: string[];
   settings: Record<string, unknown>;
+}
+
+// Helper to map backend AuthUser to frontend User format
+function mapAuthUserToUser(authUser: any): User {
+  return {
+    id: authUser.id,
+    email: authUser.email,
+    name: authUser.displayName || authUser.username || authUser.email,
+    username: authUser.username,
+    avatarUrl: authUser.avatarUrl,
+    role: {
+      id: authUser.roleId || '',
+      name: authUser.roleName || 'User',
+    },
+    department: authUser.departmentId ? {
+      id: authUser.departmentId,
+      name: authUser.departmentName || 'Default',
+    } : undefined,
+    permissions: authUser.permissions || [],
+    settings: authUser.settings || {},
+  };
 }
 
 interface InitStatus {
@@ -65,18 +87,19 @@ export const useAuthStore = create<AuthState>()(
 
       login: async (email: string, password: string) => {
         const response = await api.post('/auth/login', { email, password });
+        const data = response.data.data || response.data;
 
-        if (response.data.requiresMfa) {
+        if (data.requiresMfa) {
           set({
             mfaPending: true,
-            mfaUserId: response.data.userId,
+            mfaUserId: data.userId,
           });
           return { requiresMfa: true };
         }
 
-        const { user, accessToken, refreshToken } = response.data;
+        const { user, accessToken, refreshToken } = data;
         set({
-          user,
+          user: mapAuthUserToUser(user),
           accessToken,
           refreshToken,
           isAuthenticated: true,
@@ -96,9 +119,10 @@ export const useAuthStore = create<AuthState>()(
           code,
         });
 
-        const { user, accessToken, refreshToken } = response.data;
+        const data = response.data.data || response.data;
+        const { user, accessToken, refreshToken } = data;
         set({
-          user,
+          user: mapAuthUserToUser(user),
           accessToken,
           refreshToken,
           isAuthenticated: true,
@@ -133,12 +157,13 @@ export const useAuthStore = create<AuthState>()(
 
         try {
           const response = await api.post('/auth/refresh', { refreshToken });
-          const { accessToken, refreshToken: newRefreshToken, user } = response.data;
+          const data = response.data.data || response.data;
+          const { accessToken, refreshToken: newRefreshToken, user } = data;
 
           set({
             accessToken,
             refreshToken: newRefreshToken,
-            user,
+            user: user ? mapAuthUserToUser(user) : null,
             isAuthenticated: true,
             isLoading: false,
           });
