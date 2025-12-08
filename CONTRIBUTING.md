@@ -458,51 +458,65 @@ const displayName = user?.displayName || user?.name || 'Unknown';
 
 ### Issue: Real-Time Messages Not Appearing Without Refresh
 
-**Symptom:** Messages don't appear in real-time; page refresh required to see new messages.
+**Symptom:** Messages don't appear in real-time; page refresh required to see new messages. Same user in two browsers doesn't see messages sync. No message notifications.
 
-**Cause:** Frontend socket listeners use different event names than backend emitters.
+**Cause:** When using Socket.io with Redis adapter for horizontal scaling, room-based broadcasting (`io.to(room).emit()`) from HTTP route handlers may not reliably deliver messages. The Redis pub/sub mechanism can fail to propagate events emitted from non-socket contexts.
 
-**Solution:** Ensure socket event names match between frontend and backend:
-- Backend uses: `message:received`, `message:edited`, `message:deleted`
-- Frontend must listen to the same event names (not `message:new`)
-
-### Issue: WebSocket Events Not Reaching All User Devices
-
-**Symptom:** Real-time events (messages, test alerts, notifications) don't appear on all logged-in devices for a user, or events stop working after reconnection.
-
-**Cause:** Using in-memory socket ID tracking (`userSockets.get(userId)`) which can become stale or fail to update properly during reconnections.
-
-**Solution:** Use Socket.io room-based broadcasting instead of tracking socket IDs manually. Each user automatically joins a `user:${userId}` room on connection:
+**Solution:** Use direct socket emission by tracking socket IDs in memory and emitting directly to each socket. This bypasses the room/Redis adapter mechanism for reliable delivery:
 
 ```typescript
-// BAD: Manual socket ID tracking
-const sockets = userSockets.get(userId);
-if (sockets && sockets.size > 0) {
-  io.to(Array.from(sockets)).emit('event', data);
-}
+// Track socket IDs when users connect
+const userSockets = new Map<string, Set<string>>();
 
-// GOOD: Room-based broadcasting
-io.to(`user:${userId}`).emit('event', data);
+// On connection
+userSockets.get(userId)!.add(socket.id);
+
+// Direct socket emission (RELIABLE)
+const socketIds = userSockets.get(userId);
+if (socketIds && socketIds.size > 0) {
+  for (const socketId of socketIds) {
+    const socket = io.sockets.sockets.get(socketId);
+    if (socket) {
+      socket.emit('message:received', data);
+    }
+  }
+}
 ```
 
 **Key Points:**
-1. Users automatically join `user:${userId}` room on connection (line 98 in socket/index.ts)
-2. Socket.io manages room membership automatically, handling reconnections
-3. Use `io.to('user:${userId}')` for all user-targeted events (messages, notifications, alerts)
-4. Room broadcasting is more reliable than manual socket ID tracking
+1. Users are tracked in the `userSockets` Map when they connect (socket/index.ts)
+2. On disconnect, socket IDs are removed from tracking
+3. For message delivery, iterate through each user's socket IDs and emit directly
+4. This ensures messages reach all connected browsers/devices for a user
+5. Works regardless of whether user has "joined" a conversation room
 
-**For conversation-wide events:**
+**For conversation-wide events (messages, edits, reactions):**
 ```typescript
-// Get all participants and broadcast to their user rooms
+// broadcastToConversationParticipants in socket/index.ts
 const participants = await prisma.conversationParticipant.findMany({
   where: { conversationId, leftAt: null },
   select: { userId: true },
 });
 
 for (const participant of participants) {
-  io.to(`user:${participant.userId}`).emit(event, data);
+  const socketIds = userSockets.get(participant.userId);
+  if (socketIds) {
+    for (const socketId of socketIds) {
+      const socket = io.sockets.sockets.get(socketId);
+      if (socket) {
+        socket.emit(event, data);
+      }
+    }
+  }
 }
 ```
+
+**Frontend expects these events:**
+- `message:received` - New message in conversation
+- `message:edited` - Message was edited
+- `message:deleted` - Message was deleted
+- `notification` - General notifications
+- `test:alert` - Test alerts (working as reference implementation)
 
 ### Issue: S3 Storage Secret Key Not Persisting
 

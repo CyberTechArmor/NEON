@@ -97,6 +97,11 @@ export function createSocketServer(httpServer: HttpServer): Server {
     socket.join(`org:${orgId}`);
     socket.join(`user:${userId}`);
 
+    // Verify room membership
+    const userRoom = io!.sockets.adapter.rooms.get(`user:${userId}`);
+    console.log(`[Socket] User ${userId} joined room user:${userId}, room now has ${userRoom?.size || 0} sockets`);
+    console.log(`[Socket] Socket ${socket.id} rooms:`, Array.from(socket.rooms));
+
     // Update presence
     updatePresence(userId, 'ONLINE');
 
@@ -409,8 +414,8 @@ async function getPresenceForUsers(
 }
 
 /**
- * Send notification to user via their user room
- * Users automatically join their user room on connection
+ * Send notification to user via direct socket emission
+ * Uses the userSockets map for reliable delivery
  */
 export async function sendNotification(
   userId: string,
@@ -422,46 +427,82 @@ export async function sendNotification(
     data?: Record<string, unknown>;
   }
 ): Promise<void> {
-  if (io) {
-    console.log(`[Socket] Sending notification to user:${userId} room`);
-    io.to(`user:${userId}`).emit(SocketEvents.NOTIFICATION, {
-      ...notification,
-      body: notification.body ?? null,
-      data: notification.data ?? null,
-      createdAt: new Date().toISOString(),
-    });
+  if (!io) {
+    console.error(`[Socket] Cannot send notification to user ${userId}: io is null`);
+    return;
+  }
+
+  const socketIds = userSockets.get(userId);
+  const notificationPayload = {
+    ...notification,
+    body: notification.body ?? null,
+    data: notification.data ?? null,
+    createdAt: new Date().toISOString(),
+  };
+
+  if (socketIds && socketIds.size > 0) {
+    console.log(`[Socket] Sending notification to user ${userId} (${socketIds.size} sockets)`);
+    for (const socketId of socketIds) {
+      const socket = io.sockets.sockets.get(socketId);
+      if (socket) {
+        socket.emit(SocketEvents.NOTIFICATION, notificationPayload);
+      } else {
+        socketIds.delete(socketId);
+      }
+    }
+  } else {
+    console.log(`[Socket] User ${userId} has no active sockets for notification`);
   }
 }
 
 /**
- * Broadcast to conversation
- * Uses both room-based and direct socket broadcasting for reliability
+ * Broadcast to conversation room
+ * This is for users who have actively joined the conversation room
+ * (used as a secondary delivery mechanism)
  */
 export function broadcastToConversation(
   conversationId: string,
   event: keyof ServerToClientEvents,
   data: unknown
 ): void {
-  if (io) {
-    const room = `conversation:${conversationId}`;
-    const socketsInRoom = io.sockets.adapter.rooms.get(room);
-    const socketCount = socketsInRoom?.size || 0;
-    console.log(`[Socket] Broadcasting ${String(event)} to room ${room} (${socketCount} sockets)`);
-    io.to(room).emit(event as any, data as any);
+  if (!io) {
+    console.error(`[Socket] Cannot broadcast to conversation ${conversationId}: io is null`);
+    return;
+  }
+
+  const room = `conversation:${conversationId}`;
+  const socketsInRoom = io.sockets.adapter.rooms.get(room);
+  const socketCount = socketsInRoom?.size || 0;
+  console.log(`[Socket] Broadcasting ${String(event)} to conversation room ${room} (${socketCount} sockets in room)`);
+
+  if (socketCount > 0) {
+    // Also emit directly to the sockets in the room for reliability
+    for (const socketId of socketsInRoom!) {
+      const socket = io.sockets.sockets.get(socketId);
+      if (socket) {
+        socket.emit(event as any, data as any);
+        console.log(`[Socket] Emitted ${String(event)} directly to socket ${socketId} in conversation room`);
+      }
+    }
   }
 }
 
 /**
- * Broadcast to conversation participants using user rooms
- * Each user automatically joins their user room (user:${userId}) on connection
- * This is more reliable than tracking socket IDs in memory
+ * Broadcast to conversation participants using direct socket emission
+ * This bypasses rooms and emits directly to tracked socket IDs for reliability
  */
 export async function broadcastToConversationParticipants(
   conversationId: string,
   event: keyof ServerToClientEvents,
   data: unknown
 ): Promise<void> {
-  if (!io) return;
+  console.log(`[Socket] broadcastToConversationParticipants called for conversation ${conversationId}, event: ${String(event)}`);
+  console.log(`[Socket] io instance exists: ${!!io}`);
+
+  if (!io) {
+    console.error(`[Socket] ERROR: io is null! Cannot broadcast ${String(event)}`);
+    return;
+  }
 
   try {
     // Get all participants of the conversation
@@ -474,14 +515,35 @@ export async function broadcastToConversationParticipants(
     });
 
     const participantIds = participants.map(p => p.userId);
+    console.log(`[Socket] Found ${participantIds.length} participants:`, participantIds);
 
-    // Broadcast to each participant via their user room
-    // Users automatically join their user room on connection, so this is reliable
+    let totalSocketsEmitted = 0;
+
+    // Emit directly to each participant's socket IDs (bypass rooms for reliability)
     for (const participantUserId of participantIds) {
-      io.to(`user:${participantUserId}`).emit(event as any, data as any);
+      const socketIds = userSockets.get(participantUserId);
+
+      if (socketIds && socketIds.size > 0) {
+        console.log(`[Socket] User ${participantUserId} has ${socketIds.size} active sockets`);
+
+        // Emit directly to each socket ID
+        for (const socketId of socketIds) {
+          const socket = io.sockets.sockets.get(socketId);
+          if (socket) {
+            socket.emit(event as any, data as any);
+            totalSocketsEmitted++;
+            console.log(`[Socket] Emitted ${String(event)} directly to socket ${socketId} for user ${participantUserId}`);
+          } else {
+            console.log(`[Socket] Socket ${socketId} not found, removing from tracking`);
+            socketIds.delete(socketId);
+          }
+        }
+      } else {
+        console.log(`[Socket] User ${participantUserId} has no active sockets`);
+      }
     }
 
-    console.log(`[Socket] Broadcasting ${String(event)} to ${participantIds.length} user rooms for conversation ${conversationId}`);
+    console.log(`[Socket] Completed broadcasting ${String(event)} to ${totalSocketsEmitted} sockets for ${participantIds.length} participants`);
   } catch (error) {
     console.error(`[Socket] Error broadcasting to conversation participants:`, error);
   }
@@ -502,28 +564,60 @@ export function broadcastToOrg(
 
 /**
  * Broadcast to a specific user (all their connected devices)
+ * Uses direct socket emission for reliability
  */
 export function broadcastToUser(
   userId: string,
   event: keyof ServerToClientEvents,
   data: unknown
 ): void {
-  if (io) {
-    io.to(`user:${userId}`).emit(event as any, data as any);
+  if (!io) {
+    console.error(`[Socket] Cannot broadcast to user ${userId}: io is null`);
+    return;
+  }
+
+  const socketIds = userSockets.get(userId);
+  if (socketIds && socketIds.size > 0) {
+    console.log(`[Socket] Broadcasting ${String(event)} to user ${userId} (${socketIds.size} sockets)`);
+    for (const socketId of socketIds) {
+      const socket = io.sockets.sockets.get(socketId);
+      if (socket) {
+        socket.emit(event as any, data as any);
+      } else {
+        socketIds.delete(socketId);
+      }
+    }
+  } else {
+    console.log(`[Socket] User ${userId} has no active sockets for ${String(event)}`);
   }
 }
 
 /**
  * Broadcast to multiple users
+ * Uses direct socket emission for reliability
  */
 export function broadcastToUsers(
   userIds: string[],
   event: keyof ServerToClientEvents,
   data: unknown
 ): void {
-  if (io) {
-    for (const userId of userIds) {
-      io.to(`user:${userId}`).emit(event as any, data as any);
+  if (!io) {
+    console.error(`[Socket] Cannot broadcast to users: io is null`);
+    return;
+  }
+
+  for (const userId of userIds) {
+    const socketIds = userSockets.get(userId);
+    if (socketIds && socketIds.size > 0) {
+      for (const socketId of socketIds) {
+        const socket = io.sockets.sockets.get(socketId);
+        if (socket) {
+          socket.emit(event as any, data as any);
+        } else {
+          socketIds.delete(socketId);
+        }
+      }
     }
   }
+  console.log(`[Socket] Broadcasted ${String(event)} to ${userIds.length} users`);
 }

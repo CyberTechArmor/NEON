@@ -157,12 +157,17 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       },
     });
 
+    console.log(`[Messages API] Broadcasting new message ${message.id} in conversation ${conversationId}`);
+    console.log(`[Messages API] Message sender: ${message.senderId}, content preview: ${message.content?.substring(0, 50)}`);
+
     // Broadcast message to all conversation participants using direct socket IDs
     // This is more reliable than room-based broadcasting and ensures real-time delivery
     await broadcastToConversationParticipants(conversationId, SocketEvents.MESSAGE_RECEIVED, message);
 
     // Also broadcast to conversation room as a fallback (for users actively viewing)
     broadcastToConversation(conversationId, SocketEvents.MESSAGE_RECEIVED, message);
+
+    console.log(`[Messages API] Broadcast complete for message ${message.id}`);
 
     res.status(201).json({
       success: true,
