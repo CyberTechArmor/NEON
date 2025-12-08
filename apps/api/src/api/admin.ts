@@ -421,7 +421,7 @@ router.delete('/users/:id', requirePermission('users:manage'), async (req: Reque
       ipAddress: req.ip,
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: { message: 'User deleted' },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -775,7 +775,7 @@ router.delete('/roles/:id', requirePermission('roles:manage'), async (req: Reque
       ipAddress: req.ip,
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: { message: 'Role deleted' },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -1042,7 +1042,7 @@ router.delete('/departments/:id', requirePermission('departments:manage'), async
       ipAddress: req.ip,
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: { message: 'Department deleted' },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -1593,7 +1593,7 @@ router.post('/demo-user/regenerate', requirePermission('org:manage_settings'), a
       data: { settings: updatedSettings },
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         enabled: true,

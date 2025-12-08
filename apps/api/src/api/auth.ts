@@ -357,7 +357,7 @@ router.post('/mfa/verify', authenticate, async (req: Request, res: Response, nex
       },
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         message: 'MFA enabled successfully',
