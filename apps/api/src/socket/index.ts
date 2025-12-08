@@ -437,6 +437,7 @@ export async function sendNotification(
 
 /**
  * Broadcast to conversation
+ * Uses both room-based and direct socket broadcasting for reliability
  */
 export function broadcastToConversation(
   conversationId: string,
@@ -447,8 +448,48 @@ export function broadcastToConversation(
     const room = `conversation:${conversationId}`;
     const socketsInRoom = io.sockets.adapter.rooms.get(room);
     const socketCount = socketsInRoom?.size || 0;
-    console.log(`[Socket] Broadcasting ${event} to room ${room} (${socketCount} sockets)`);
+    console.log(`[Socket] Broadcasting ${String(event)} to room ${room} (${socketCount} sockets)`);
     io.to(room).emit(event as any, data as any);
+  }
+}
+
+/**
+ * Broadcast to conversation using direct socket IDs
+ * This is more reliable than room-based broadcasting
+ */
+export async function broadcastToConversationParticipants(
+  conversationId: string,
+  event: keyof ServerToClientEvents,
+  data: unknown
+): Promise<void> {
+  if (!io) return;
+
+  try {
+    // Get all participants of the conversation
+    const participants = await prisma.conversationParticipant.findMany({
+      where: {
+        conversationId,
+        leftAt: null,
+      },
+      select: { userId: true },
+    });
+
+    const participantIds = participants.map(p => p.userId);
+    let totalSocketsNotified = 0;
+
+    // Broadcast to each participant's sockets directly (like test alerts)
+    for (const userId of participantIds) {
+      const sockets = userSockets.get(userId);
+      if (sockets && sockets.size > 0) {
+        const socketIds = Array.from(sockets);
+        io.to(socketIds).emit(event as any, data as any);
+        totalSocketsNotified += socketIds.length;
+      }
+    }
+
+    console.log(`[Socket] Broadcasting ${String(event)} to ${participantIds.length} participants (${totalSocketsNotified} sockets) for conversation ${conversationId}`);
+  } catch (error) {
+    console.error(`[Socket] Error broadcasting to conversation participants:`, error);
   }
 }
 

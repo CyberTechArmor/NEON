@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { useEffect, useState, useMemo } from 'react';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuthStore } from '../stores/auth';
 import { useSocketStore } from '../stores/socket';
+import { useChatStore } from '../stores/chat';
 import { notificationsApi } from '../lib/api';
 import {
   MessageSquare,
@@ -22,6 +23,7 @@ import {
   AlertTriangle,
   Wifi,
   WifiOff,
+  Home,
 } from 'lucide-react';
 
 interface Notification {
@@ -50,11 +52,18 @@ export default function AppLayout() {
     acknowledgeTestAlert,
     lastActivityAt,
   } = useSocketStore();
+  const { conversations } = useChatStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  // Calculate total unread message count from all conversations
+  const totalUnreadMessages = useMemo(() => {
+    return conversations.reduce((total, conv) => total + (conv.unreadCount || 0), 0);
+  }, [conversations]);
 
   // Initial fetch of notifications (then use WebSocket for real-time updates)
   const { data: notificationsData, isLoading: notificationsLoading } = useQuery({
@@ -350,11 +359,195 @@ export default function AppLayout() {
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 overflow-hidden">
+        {/* Page content - add padding bottom on mobile for the nav bar */}
+        <main className="flex-1 overflow-hidden pb-16 lg:pb-0">
           <Outlet />
         </main>
       </div>
+
+      {/* Mobile Bottom Navigation Bar */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-neon-surface border-t border-neon-border safe-area-inset-bottom">
+        <div className="flex items-center justify-around h-16">
+          {/* Messages */}
+          <NavLink
+            to="/chat"
+            className={({ isActive }) =>
+              `flex flex-col items-center justify-center flex-1 h-full relative ${
+                isActive ? 'text-neon-accent' : 'text-neon-text-muted'
+              }`
+            }
+          >
+            <div className="relative">
+              <MessageSquare className="w-5 h-5" />
+              {totalUnreadMessages > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center text-[10px] font-bold bg-neon-error text-white rounded-full px-1">
+                  {totalUnreadMessages > 99 ? '99+' : totalUnreadMessages}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] mt-0.5">Messages</span>
+          </NavLink>
+
+          {/* Meetings */}
+          <NavLink
+            to="/meetings"
+            className={({ isActive }) =>
+              `flex flex-col items-center justify-center flex-1 h-full ${
+                isActive ? 'text-neon-accent' : 'text-neon-text-muted'
+              }`
+            }
+          >
+            <Calendar className="w-5 h-5" />
+            <span className="text-[10px] mt-0.5">Meetings</span>
+          </NavLink>
+
+          {/* Notifications */}
+          <button
+            className={`flex flex-col items-center justify-center flex-1 h-full ${
+              notificationsOpen ? 'text-neon-accent' : 'text-neon-text-muted'
+            }`}
+            onClick={() => setNotificationsOpen(!notificationsOpen)}
+          >
+            <div className="relative">
+              <Bell className="w-5 h-5" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center text-[10px] font-bold bg-neon-error text-white rounded-full px-1">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] mt-0.5">Alerts</span>
+          </button>
+
+          {/* Settings */}
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `flex flex-col items-center justify-center flex-1 h-full ${
+                isActive ? 'text-neon-accent' : 'text-neon-text-muted'
+              }`
+            }
+          >
+            <Settings className="w-5 h-5" />
+            <span className="text-[10px] mt-0.5">Settings</span>
+          </NavLink>
+
+          {/* Admin (conditional) */}
+          {(hasPermission('audit:view') || hasPermission('org:view_settings')) && (
+            <NavLink
+              to="/admin"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center flex-1 h-full ${
+                  isActive ? 'text-neon-accent' : 'text-neon-text-muted'
+                }`
+              }
+            >
+              <Shield className="w-5 h-5" />
+              <span className="text-[10px] mt-0.5">Admin</span>
+            </NavLink>
+          )}
+        </div>
+      </nav>
+
+      {/* Mobile Notifications Panel (slides up from bottom nav) */}
+      {notificationsOpen && (
+        <>
+          <div
+            className="lg:hidden fixed inset-0 z-40 bg-black/50"
+            onClick={() => setNotificationsOpen(false)}
+          />
+          <div className="lg:hidden fixed bottom-16 left-0 right-0 z-50 bg-neon-surface border-t border-neon-border rounded-t-2xl max-h-[60vh] overflow-hidden animate-slide-up">
+            <div className="flex items-center justify-between p-4 border-b border-neon-border">
+              <h3 className="font-medium">Notifications</h3>
+              <div className="flex items-center gap-2">
+                {unreadCount > 0 && (
+                  <button
+                    className="text-xs text-neon-accent hover:underline"
+                    onClick={() => markAllReadMutation.mutate()}
+                  >
+                    Mark all read
+                  </button>
+                )}
+                <button
+                  className="p-1 hover:bg-neon-surface-hover rounded"
+                  onClick={() => setNotificationsOpen(false)}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto max-h-[calc(60vh-60px)]">
+              {notificationsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-neon-text-muted" />
+                </div>
+              ) : !displayNotifications?.length ? (
+                <div className="py-8 text-center text-neon-text-muted">
+                  <Bell className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No notifications</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-neon-border">
+                  {displayNotifications.map((notification) => (
+                    <div
+                      key={notification.id}
+                      className={`p-4 hover:bg-neon-surface-hover active:bg-neon-surface-hover cursor-pointer ${
+                        !notification.read ? 'bg-neon-accent/5' : ''
+                      }`}
+                      onClick={() => {
+                        if (!notification.read) {
+                          markReadMutation.mutate(notification.id);
+                        }
+                        // Navigate based on notification type
+                        if (notification.data?.conversationId) {
+                          navigate(`/chat/${notification.data.conversationId}`);
+                          setNotificationsOpen(false);
+                        } else if (notification.data?.meetingId) {
+                          navigate(`/meetings`);
+                          setNotificationsOpen(false);
+                        }
+                      }}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${
+                          notification.type === 'message' ? 'bg-neon-accent/20' :
+                          notification.type === 'meeting' ? 'bg-neon-warning/20' :
+                          'bg-neon-surface-hover'
+                        }`}>
+                          {notification.type === 'message' ? (
+                            <MessageSquare className="w-5 h-5 text-neon-accent" />
+                          ) : notification.type === 'meeting' ? (
+                            <Calendar className="w-5 h-5 text-neon-warning" />
+                          ) : (
+                            <Bell className="w-5 h-5 text-neon-text-muted" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">{notification.title}</p>
+                          {notification.body && (
+                            <p className="text-xs text-neon-text-muted line-clamp-2 mt-0.5">
+                              {notification.body}
+                            </p>
+                          )}
+                          <p className="text-xs text-neon-text-muted mt-1">
+                            {formatDistanceToNow(new Date(notification.createdAt), {
+                              addSuffix: true,
+                            })}
+                          </p>
+                        </div>
+                        {!notification.read && (
+                          <span className="w-2 h-2 bg-neon-accent rounded-full flex-shrink-0 mt-2" />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Test Alert Modal */}
       {activeTestAlert && (

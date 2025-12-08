@@ -119,11 +119,11 @@ export function playTestAlertSound(volume: number = 0.7): void {
 }
 
 /**
- * Show a browser notification
+ * Show a browser notification with optional navigation on click
  */
 export async function showBrowserNotification(
   title: string,
-  options?: NotificationOptions
+  options?: NotificationOptions & { conversationId?: string }
 ): Promise<Notification | null> {
   // Check if notifications are supported
   if (!('Notification' in window)) {
@@ -138,19 +138,37 @@ export async function showBrowserNotification(
   }
 
   try {
+    const { conversationId, ...notificationOptions } = options || {};
+
     const notification = new Notification(title, {
       icon: '/neon-icon.svg',
       badge: '/neon-icon.svg',
-      ...options,
+      ...notificationOptions,
     });
 
     // Auto-close after 5 seconds
     setTimeout(() => notification.close(), 5000);
 
-    // Focus window when clicked
+    // Handle click - navigate to conversation if provided
     notification.onclick = () => {
       window.focus();
       notification.close();
+
+      // Navigate to conversation if conversationId is provided
+      // This works for both PWA and regular browser
+      if (conversationId) {
+        // Use the current origin to build the URL
+        const chatUrl = `${window.location.origin}/chat/${conversationId}`;
+
+        // If we're in a standalone PWA, use the existing window
+        if (window.matchMedia('(display-mode: standalone)').matches ||
+            (window.navigator as any).standalone) {
+          window.location.href = chatUrl;
+        } else {
+          // For regular browser, also navigate in the current window
+          window.location.href = chatUrl;
+        }
+      }
     };
 
     return notification;
@@ -184,7 +202,8 @@ export function showMessageNotification(
       body: messageContent.substring(0, 100) + (messageContent.length > 100 ? '...' : ''),
       tag: conversationId || 'message', // Group notifications by conversation
       renotify: true,
-    } as NotificationOptions);
+      conversationId, // Pass conversationId for navigation on click
+    } as NotificationOptions & { conversationId?: string });
   }
 }
 
