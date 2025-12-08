@@ -136,10 +136,12 @@ export function createSocketServer(httpServer: HttpServer): Server {
     // ==========================================================================
 
     socket.on(SocketEvents.CONVERSATION_JOIN, (conversationId) => {
+      console.log(`[Socket] User ${userId} joining conversation:`, conversationId);
       socket.join(`conversation:${conversationId}`);
     });
 
     socket.on(SocketEvents.CONVERSATION_LEAVE, (conversationId) => {
+      console.log(`[Socket] User ${userId} leaving conversation:`, conversationId);
       socket.leave(`conversation:${conversationId}`);
     });
 
@@ -441,7 +443,11 @@ export function broadcastToConversation(
   data: unknown
 ): void {
   if (io) {
-    io.to(`conversation:${conversationId}`).emit(event as any, data as any);
+    const room = `conversation:${conversationId}`;
+    const socketsInRoom = io.sockets.adapter.rooms.get(room);
+    const socketCount = socketsInRoom?.size || 0;
+    console.log(`[Socket] Broadcasting ${event} to room ${room} (${socketCount} sockets)`);
+    io.to(room).emit(event as any, data as any);
   }
 }
 

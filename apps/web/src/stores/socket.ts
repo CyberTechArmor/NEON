@@ -116,6 +116,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
     // Message events - use correct event names matching backend SocketEvents
     socket.on('message:received', (message: any) => {
+      console.log('[Socket] Message received via WebSocket:', message);
       // Handle message received event from backend
       const formattedMessage = {
         ...message,
@@ -339,16 +340,23 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   },
 
   joinConversation: (conversationId) => {
-    const { socket } = get();
-    if (!socket) return;
-    // Send just the conversationId string, not an object
+    const { socket, isConnected } = get();
+    if (!socket) {
+      console.warn('[Socket] joinConversation called but socket is null');
+      return;
+    }
+    if (!isConnected) {
+      console.warn('[Socket] joinConversation called but not connected');
+      return;
+    }
+    console.log('[Socket] Joining conversation room:', conversationId);
     socket.emit('conversation:join', conversationId);
   },
 
   leaveConversation: (conversationId) => {
-    const { socket } = get();
-    if (!socket) return;
-    // Send just the conversationId string, not an object
+    const { socket, isConnected } = get();
+    if (!socket || !isConnected) return;
+    console.log('[Socket] Leaving conversation room:', conversationId);
     socket.emit('conversation:leave', conversationId);
   },
 

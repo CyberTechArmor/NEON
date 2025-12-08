@@ -619,6 +619,7 @@ export default function ChatPage() {
   // Update conversation when ID changes
   useEffect(() => {
     if (conversationId && conversationId !== currentConversationId) {
+      console.log('[ChatPage] Conversation changed, joining room:', conversationId);
       // Leave old conversation room
       if (currentConversationId) {
         leaveConversation(currentConversationId);
@@ -629,9 +630,11 @@ export default function ChatPage() {
     }
   }, [conversationId, currentConversationId, joinConversation, leaveConversation, setCurrentConversation]);
 
-  // Rejoin conversation room when socket reconnects
+  // Rejoin conversation room when socket reconnects or conversation changes
   useEffect(() => {
+    console.log('[ChatPage] Socket/conversation effect:', { isConnected, conversationId });
     if (isConnected && conversationId) {
+      console.log('[ChatPage] Joining conversation room on connect:', conversationId);
       joinConversation(conversationId);
     }
   }, [isConnected, conversationId, joinConversation]);
