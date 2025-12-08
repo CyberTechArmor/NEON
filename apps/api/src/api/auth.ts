@@ -551,26 +551,88 @@ router.post('/mfa/verify', authenticate, async (req: Request, res: Response, nex
 
 /**
  * DELETE /auth/mfa
- * Disable MFA
+ * Disable MFA for the authenticated user
+ * Requires password confirmation for security
  */
 router.delete(
   '/mfa',
   authenticate,
-  requireMfa,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // TODO: Implement MFA disable
+      const { password, code } = req.body;
 
-      res.json({
+      if (!password) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'PASSWORD_REQUIRED', message: 'Password is required to disable MFA' },
+          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        });
+      }
+
+      // Verify user exists and has MFA enabled
+      const user = await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { id: true, passwordHash: true, mfaEnabled: true, mfaSecret: true },
+      });
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'USER_NOT_FOUND', message: 'User not found' },
+          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        });
+      }
+
+      if (!user.mfaEnabled) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'MFA_NOT_ENABLED', message: 'MFA is not enabled for this account' },
+          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        });
+      }
+
+      // Verify password
+      const passwordValid = await AuthService.verifyPassword(password, user.passwordHash || '');
+      if (!passwordValid) {
+        return res.status(401).json({
+          success: false,
+          error: { code: 'INVALID_PASSWORD', message: 'Incorrect password' },
+          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        });
+      }
+
+      // Optionally verify MFA code if provided (extra security)
+      if (code && user.mfaSecret) {
+        const codeValid = AuthService.verifyTotpCode(code, user.mfaSecret);
+        if (!codeValid) {
+          return res.status(401).json({
+            success: false,
+            error: { code: 'INVALID_MFA_CODE', message: 'Incorrect MFA code' },
+            meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+          });
+        }
+      }
+
+      // Disable MFA
+      await prisma.user.update({
+        where: { id: req.userId },
+        data: {
+          mfaEnabled: false,
+          mfaSecret: null,
+          mfaBackupCodes: [],
+        },
+      });
+
+      return res.json({
         success: true,
-        data: { message: 'MFA disabled' },
+        data: { message: 'MFA has been disabled successfully' },
         meta: {
           requestId: req.requestId,
           timestamp: new Date().toISOString(),
         },
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 );

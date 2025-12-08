@@ -207,6 +207,8 @@ function SecuritySettings() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showMfaSetup, setShowMfaSetup] = useState(false);
+  const [showMfaDisable, setShowMfaDisable] = useState(false);
+  const [mfaDisablePassword, setMfaDisablePassword] = useState('');
   const [mfaSecret, setMfaSecret] = useState<string | null>(null);
   const [mfaQrCode, setMfaQrCode] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState('');
@@ -292,6 +294,30 @@ function SecuritySettings() {
       toast.error(getErrorMessage(error));
     },
   });
+
+  const disableMfaMutation = useMutation({
+    mutationFn: async (password: string) => {
+      const response = await api.delete('/auth/mfa', { data: { password } });
+      return response.data.data;
+    },
+    onSuccess: () => {
+      setMfaEnabled(false);
+      setShowMfaDisable(false);
+      setMfaDisablePassword('');
+      toast.success('Two-factor authentication has been disabled');
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error));
+    },
+  });
+
+  const handleDisableMfa = () => {
+    if (!mfaDisablePassword) {
+      toast.error('Please enter your password');
+      return;
+    }
+    disableMfaMutation.mutate(mfaDisablePassword);
+  };
 
   const handleStartMfaSetup = () => {
     setShowMfaSetup(true);
@@ -426,9 +452,57 @@ function SecuritySettings() {
               <Check className="w-5 h-5" />
               <span className="font-medium">Two-factor authentication is enabled</span>
             </div>
-            <p className="text-sm text-neon-text-muted">
+            <p className="text-sm text-neon-text-muted mb-4">
               Your account is protected with an authenticator app.
             </p>
+
+            {showMfaDisable ? (
+              <div className="border-t border-neon-border pt-4 mt-4">
+                <p className="text-sm text-neon-text-muted mb-3">
+                  Enter your password to disable two-factor authentication:
+                </p>
+                <div className="space-y-3">
+                  <div className="relative">
+                    <input
+                      type="password"
+                      className="input w-full"
+                      placeholder="Enter your password"
+                      value={mfaDisablePassword}
+                      onChange={(e) => setMfaDisablePassword(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      className="btn btn-error flex-1"
+                      onClick={handleDisableMfa}
+                      disabled={disableMfaMutation.isPending}
+                    >
+                      {disableMfaMutation.isPending ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        'Disable MFA'
+                      )}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setShowMfaDisable(false);
+                        setMfaDisablePassword('');
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <button
+                className="btn btn-secondary btn-sm text-neon-error hover:bg-neon-error/20"
+                onClick={() => setShowMfaDisable(true)}
+              >
+                Disable 2FA
+              </button>
+            )}
           </div>
         ) : !showMfaSetup ? (
           <div className="card p-4 max-w-md">

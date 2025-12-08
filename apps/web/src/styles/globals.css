@@ -256,6 +256,11 @@
   /* Message bubble */
   .message-bubble {
     @apply max-w-[70%] px-3 py-2 rounded-lg;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    hyphens: auto;
+    min-width: 0;
   }
 
   .message-bubble-own {

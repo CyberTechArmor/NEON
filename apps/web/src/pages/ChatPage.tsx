@@ -302,7 +302,7 @@ function ConversationItem({
 
   const displayName =
     conversation.type === 'DIRECT'
-      ? otherParticipant?.name || 'Unknown'
+      ? otherParticipant?.displayName || otherParticipant?.name || 'Unknown'
       : conversation.name || 'Group Chat';
 
   const avatar =
@@ -388,11 +388,11 @@ function MessageBubble({
           {message.sender.avatarUrl ? (
             <img
               src={message.sender.avatarUrl}
-              alt={message.sender.name}
+              alt={message.sender.displayName || message.sender.name}
               className="w-full h-full object-cover"
             />
           ) : (
-            <span>{message.sender.name.charAt(0).toUpperCase()}</span>
+            <span>{(message.sender.displayName || message.sender.name)?.charAt(0).toUpperCase()}</span>
           )}
         </div>
       )}
@@ -401,7 +401,7 @@ function MessageBubble({
       <div className={`flex flex-col gap-1 ${isOwn ? 'items-end' : 'items-start'}`}>
         {/* Sender name (only for group chats) */}
         {!isOwn && (
-          <span className="text-xs text-neon-text-muted">{message.sender.name}</span>
+          <span className="text-xs text-neon-text-muted">{message.sender.displayName || message.sender.name}</span>
         )}
 
         {/* Reply preview */}
@@ -706,6 +706,8 @@ export default function ChatPage() {
                       {(currentConversation.type === 'DIRECT'
                         ? currentConversation.participants.find(
                             (p: any) => p.userId !== user?.id
+                          )?.user.displayName || currentConversation.participants.find(
+                            (p: any) => p.userId !== user?.id
                           )?.user.name
                         : currentConversation.name || 'Group'
                       )?.charAt(0).toUpperCase()}
@@ -717,7 +719,9 @@ export default function ChatPage() {
                     {currentConversation.type === 'DIRECT'
                       ? currentConversation.participants.find(
                           (p: any) => p.userId !== user?.id
-                        )?.user.name
+                        )?.user.displayName || currentConversation.participants.find(
+                          (p: any) => p.userId !== user?.id
+                        )?.user.name || 'Unknown'
                       : currentConversation.name || 'Group Chat'}
                   </h3>
                   <p className="text-sm text-neon-text-muted">

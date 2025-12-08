@@ -427,6 +427,72 @@ field: z.string().optional().or(z.literal('').transform(() => undefined))
 docker compose build --no-cache
 ```
 
+### Issue: Message CSS Word-Wrapping (Text Breaking Mid-Word)
+
+**Symptom:** Short messages like "Hello!" appear broken across lines as "He\nllo!"
+
+**Solution:** Add proper word-break CSS properties to `.message-bubble` class:
+```css
+.message-bubble {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  hyphens: auto;
+  min-width: 0;
+}
+```
+
+### Issue: Display Name Showing "Unknown" in Chat
+
+**Symptom:** User display names appear as "Unknown" in conversation list or message cards.
+
+**Cause:** Backend returns `displayName` but frontend was only checking for `name` property.
+
+**Solution:** Update frontend to check for both properties:
+```typescript
+// Use displayName with fallback to name
+const displayName = user?.displayName || user?.name || 'Unknown';
+```
+
+### Issue: Real-Time Messages Not Appearing Without Refresh
+
+**Symptom:** Messages don't appear in real-time; page refresh required to see new messages.
+
+**Cause:** Frontend socket listeners use different event names than backend emitters.
+
+**Solution:** Ensure socket event names match between frontend and backend:
+- Backend uses: `message:received`, `message:edited`, `message:deleted`
+- Frontend must listen to the same event names (not `message:new`)
+
+### Issue: S3 Storage Secret Key Not Persisting
+
+**Symptom:** S3 connection works during test but fails later; credentials appear lost.
+
+**Cause:** When saving settings without re-entering the secret key (intentionally not pre-filled for security), empty string overwrites existing secret.
+
+**Solution:** Only include `secretAccessKey` in save payload if user entered a new value:
+```typescript
+const storageData = { ...formData };
+if (!storageData.secretAccessKey) {
+  delete storageData.secretAccessKey;
+}
+saveMutation.mutate({ storage: storageData });
+```
+
+### Issue: Cross-Department Messaging Not Respecting Settings
+
+**Symptom:** Users can message across departments even when disabled, or directional restrictions not enforced.
+
+**Solution:** The permissions service must:
+1. Load organization messaging settings from database
+2. Check `crossDepartmentMessaging` flag before allowing cross-dept communication
+3. Validate `crossDepartmentDirection` based on department ranks:
+   - `both`: Bidirectional messaging allowed
+   - `higher_to_lower`: Only higher-ranked departments can initiate
+   - `lower_to_higher`: Only lower-ranked departments can initiate
+   - `none`: No cross-department messaging
+4. Apply `requireApprovalForCrossDept` when set
+
 ---
 
 ## Getting Help

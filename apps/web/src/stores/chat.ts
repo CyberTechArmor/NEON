@@ -12,6 +12,7 @@ interface Message {
   sender: {
     id: string;
     name: string;
+    displayName?: string;
     avatarUrl?: string;
   };
   reactions: Array<{
@@ -44,6 +45,7 @@ interface Conversation {
     user: {
       id: string;
       name: string;
+      displayName?: string;
       avatarUrl?: string;
       presence: string;
     };
