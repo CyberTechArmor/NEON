@@ -178,11 +178,13 @@ export function showMessageNotification(
 
   // Show browser notification if enabled and permitted
   if (browserNotificationsEnabled && Notification.permission === 'granted') {
+    // Note: 'renotify' is a valid Web Notifications API property but not in TypeScript's
+    // NotificationOptions type. Use type assertion for extended notification options.
     showBrowserNotification(senderName, {
       body: messageContent.substring(0, 100) + (messageContent.length > 100 ? '...' : ''),
       tag: conversationId || 'message', // Group notifications by conversation
       renotify: true,
-    });
+    } as NotificationOptions);
   }
 }
 
