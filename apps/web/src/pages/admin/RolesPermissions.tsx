@@ -243,6 +243,9 @@ function PermissionEditor({
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<string[]>(Object.keys(PERMISSION_CATEGORIES));
 
+  // Get all permission keys for select all functionality
+  const allPermissionKeys = Object.values(PERMISSION_CATEGORIES).flat().map(p => p.key);
+
   // Fetch current permissions
   const { data: permissions, isLoading } = useQuery({
     queryKey: ['admin', entityType, entityId, 'permissions'],
@@ -293,6 +296,61 @@ function PermissionEditor({
     );
   };
 
+  // Select all permissions
+  const selectAll = () => {
+    const newPerms: Record<string, boolean> = {};
+    allPermissionKeys.forEach((key) => {
+      newPerms[key] = true;
+    });
+    setLocalPermissions(newPerms);
+  };
+
+  // Deselect all permissions
+  const deselectAll = () => {
+    const newPerms: Record<string, boolean> = {};
+    allPermissionKeys.forEach((key) => {
+      newPerms[key] = false;
+    });
+    setLocalPermissions(newPerms);
+  };
+
+  // Select all permissions in a category
+  const selectCategory = (category: string) => {
+    const categoryPerms = PERMISSION_CATEGORIES[category as keyof typeof PERMISSION_CATEGORIES] || [];
+    setLocalPermissions((prev) => {
+      const newPerms = { ...prev };
+      categoryPerms.forEach((p) => {
+        newPerms[p.key] = true;
+      });
+      return newPerms;
+    });
+  };
+
+  // Deselect all permissions in a category
+  const deselectCategory = (category: string) => {
+    const categoryPerms = PERMISSION_CATEGORIES[category as keyof typeof PERMISSION_CATEGORIES] || [];
+    setLocalPermissions((prev) => {
+      const newPerms = { ...prev };
+      categoryPerms.forEach((p) => {
+        newPerms[p.key] = false;
+      });
+      return newPerms;
+    });
+  };
+
+  // Check if all permissions in a category are selected
+  const isCategoryFullySelected = (category: string): boolean => {
+    const categoryPerms = PERMISSION_CATEGORIES[category as keyof typeof PERMISSION_CATEGORIES] || [];
+    return categoryPerms.every((p) => localPermissions[p.key]);
+  };
+
+  // Check if some permissions in a category are selected
+  const isCategoryPartiallySelected = (category: string): boolean => {
+    const categoryPerms = PERMISSION_CATEGORIES[category as keyof typeof PERMISSION_CATEGORIES] || [];
+    const selectedCount = categoryPerms.filter((p) => localPermissions[p.key]).length;
+    return selectedCount > 0 && selectedCount < categoryPerms.length;
+  };
+
   const handleSave = () => {
     const perms = Object.entries(localPermissions).map(([permission, granted]) => ({
       permission,
@@ -324,7 +382,7 @@ function PermissionEditor({
           </button>
         </div>
 
-        <div className="p-4 border-b border-neon-border">
+        <div className="p-4 border-b border-neon-border space-y-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neon-text-muted" />
             <input
@@ -334,6 +392,24 @@ function PermissionEditor({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-sm btn-secondary"
+              onClick={selectAll}
+            >
+              <Check className="w-3 h-3" />
+              Select All
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={deselectAll}
+            >
+              <X className="w-3 h-3" />
+              Deselect All
+            </button>
           </div>
         </div>
 
@@ -346,17 +422,46 @@ function PermissionEditor({
             <div className="space-y-4">
               {filteredCategories.map(([category, perms]) => (
                 <div key={category} className="card">
-                  <button
-                    className="flex items-center justify-between w-full p-3 text-left hover:bg-neon-surface-hover"
-                    onClick={() => toggleCategory(category)}
-                  >
-                    <span className="font-medium">{category}</span>
-                    {expandedCategories.includes(category) ? (
-                      <ChevronDown className="w-4 h-4" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4" />
-                    )}
-                  </button>
+                  <div className="flex items-center justify-between p-3 hover:bg-neon-surface-hover">
+                    <button
+                      className="flex items-center gap-2 text-left flex-1"
+                      onClick={() => toggleCategory(category)}
+                    >
+                      {expandedCategories.includes(category) ? (
+                        <ChevronDown className="w-4 h-4" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4" />
+                      )}
+                      <span className="font-medium">{category}</span>
+                      <span className="text-xs text-neon-text-muted">
+                        ({perms.filter(p => localPermissions[p.key]).length}/{perms.length})
+                      </span>
+                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-ghost text-neon-accent"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selectCategory(category);
+                        }}
+                        title="Select all in category"
+                      >
+                        <Check className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-ghost text-neon-text-muted"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deselectCategory(category);
+                        }}
+                        title="Deselect all in category"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
 
                   {expandedCategories.includes(category) && (
                     <div className="border-t border-neon-border">

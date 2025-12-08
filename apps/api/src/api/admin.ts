@@ -12,6 +12,7 @@ import { checkRedisHealth } from '../services/redis';
 import { getJobStatus, triggerJob } from '../jobs';
 import { hashPassword, generateSecureToken } from '../services/auth';
 import { S3Client, HeadBucketCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { clearOrgS3Cache } from '../services/s3';
 
 const router = Router();
 router.use(authenticate);
@@ -117,13 +118,19 @@ router.post('/audit/verify', requirePermission('audit:view'), async (req: Reques
  */
 router.get('/stats', requirePermission('org:view_settings'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const [users, messages, meetings, storage, activeToday] = await Promise.all([
+    const [users, messages, meetings, storageData, activeToday] = await Promise.all([
       prisma.user.count({ where: { orgId: req.orgId!, status: 'ACTIVE' } }),
       prisma.message.count({ where: { conversation: { orgId: req.orgId! } } }),
       prisma.meeting.count({ where: { orgId: req.orgId! } }),
       prisma.organization.findUnique({ where: { id: req.orgId! }, select: { storageUsed: true, storageLimit: true } }),
       prisma.user.count({ where: { orgId: req.orgId!, lastActiveAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } } }),
     ]);
+
+    // Convert BigInt to Number for JSON serialization
+    const storage = storageData ? {
+      storageUsed: Number(storageData.storageUsed),
+      storageLimit: storageData.storageLimit ? Number(storageData.storageLimit) : null,
+    } : null;
 
     res.json({
       success: true,
@@ -460,6 +467,90 @@ router.post('/users/:id/disable-mfa', requirePermission('users:manage'), async (
     res.json({
       success: true,
       data: { message: 'MFA disabled' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /admin/users/:id/permissions
+ * Get user-specific permissions
+ */
+router.get('/users/:id/permissions', requirePermission('users:manage'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await prisma.user.findFirst({
+      where: { id: req.params.id, orgId: req.orgId! },
+      select: { settings: true },
+    });
+
+    if (!user) {
+      throw new NotFoundError('User', req.params.id);
+    }
+
+    // User-specific permissions are stored in settings.permissions array
+    const settings = user.settings as Record<string, any> || {};
+    const permissions = settings.permissions || [];
+
+    res.json({
+      success: true,
+      data: permissions,
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /admin/users/:id/permissions
+ * Set user-specific permissions
+ */
+router.put('/users/:id/permissions', requirePermission('users:manage'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { permissions } = req.body;
+
+    // Get existing user
+    const existingUser = await prisma.user.findFirst({
+      where: { id: req.params.id, orgId: req.orgId! },
+      select: { settings: true },
+    });
+
+    if (!existingUser) {
+      throw new NotFoundError('User', req.params.id);
+    }
+
+    // Convert from array of {permission, granted} to array of permission strings
+    const permissionStrings = Array.isArray(permissions)
+      ? permissions.filter((p: any) => p.granted).map((p: any) => p.permission)
+      : [];
+
+    // Merge with existing settings
+    const existingSettings = existingUser.settings as Record<string, any> || {};
+    const updatedSettings = {
+      ...existingSettings,
+      permissions: permissionStrings,
+    };
+
+    await prisma.user.update({
+      where: { id: req.params.id },
+      data: { settings: updatedSettings },
+    });
+
+    await AuditService.log({
+      action: 'user.permissions_updated',
+      resourceType: 'user',
+      resourceId: req.params.id,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { permissions: permissionStrings },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: permissionStrings,
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
@@ -890,6 +981,90 @@ router.delete('/departments/:id', requirePermission('departments:manage'), async
   }
 });
 
+/**
+ * GET /admin/departments/:id/permissions
+ * Get department permissions
+ */
+router.get('/departments/:id/permissions', requirePermission('departments:manage'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const department = await prisma.department.findFirst({
+      where: { id: req.params.id, orgId: req.orgId! },
+      select: { settings: true },
+    });
+
+    if (!department) {
+      throw new NotFoundError('Department', req.params.id);
+    }
+
+    // Department permissions are stored in settings.permissions array
+    const settings = department.settings as Record<string, any> || {};
+    const permissions = settings.permissions || [];
+
+    res.json({
+      success: true,
+      data: permissions,
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /admin/departments/:id/permissions
+ * Set department permissions
+ */
+router.put('/departments/:id/permissions', requirePermission('departments:manage'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { permissions } = req.body;
+
+    // Get existing department
+    const existingDept = await prisma.department.findFirst({
+      where: { id: req.params.id, orgId: req.orgId! },
+      select: { settings: true },
+    });
+
+    if (!existingDept) {
+      throw new NotFoundError('Department', req.params.id);
+    }
+
+    // Convert from array of {permission, granted} to array of permission strings
+    const permissionStrings = Array.isArray(permissions)
+      ? permissions.filter((p: any) => p.granted).map((p: any) => p.permission)
+      : [];
+
+    // Merge with existing settings
+    const existingSettings = existingDept.settings as Record<string, any> || {};
+    const updatedSettings = {
+      ...existingSettings,
+      permissions: permissionStrings,
+    };
+
+    await prisma.department.update({
+      where: { id: req.params.id },
+      data: { settings: updatedSettings },
+    });
+
+    await AuditService.log({
+      action: 'department.permissions_updated',
+      resourceType: 'department',
+      resourceId: req.params.id,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { permissions: permissionStrings },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: permissionStrings,
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ============================================================================
 // Organization Settings Routes
 // ============================================================================
@@ -1009,6 +1184,11 @@ router.patch('/organization/settings', requirePermission('org:manage_settings'),
       data: { settings: mergedSettings },
       select: { settings: true },
     });
+
+    // Clear S3 cache if storage settings were updated
+    if (req.body.storage) {
+      clearOrgS3Cache(req.orgId!);
+    }
 
     await AuditService.log({
       action: 'organization.settings_updated',

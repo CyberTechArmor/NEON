@@ -280,6 +280,12 @@ export const adminApi = {
 
     disableMfa: (id: string) => api.post(`/admin/users/${id}/disable-mfa`),
 
+    getPermissions: (id: string) =>
+      api.get<ApiResponse<unknown[]>>(`/admin/users/${id}/permissions`),
+
+    setPermissions: (id: string, permissions: { permission: string; granted: boolean }[]) =>
+      api.put(`/admin/users/${id}/permissions`, { permissions }),
+
     bulkImport: (file: File) => {
       const formData = new FormData();
       formData.append('file', file);

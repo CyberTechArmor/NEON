@@ -107,7 +107,9 @@ export function createSocketServer(httpServer: HttpServer): Server {
     // ==========================================================================
 
     socket.on(SocketEvents.PRESENCE_UPDATE, async (data) => {
-      await updatePresence(userId, data.status, data.message);
+      // Normalize status to uppercase for Prisma enum compatibility
+      const normalizedStatus = normalizePresenceStatus(data.status);
+      await updatePresence(userId, normalizedStatus, data.message);
     });
 
     socket.on(SocketEvents.PRESENCE_SUBSCRIBE, async (userIds) => {
@@ -316,6 +318,27 @@ async function updatePresence(
 }
 
 type PresenceStatus = 'ONLINE' | 'AWAY' | 'DND' | 'OFFLINE';
+
+/**
+ * Normalize presence status string to Prisma enum format (uppercase)
+ * Handles lowercase values from frontend and 'busy' -> 'DND' mapping
+ */
+function normalizePresenceStatus(status: string): PresenceStatus {
+  const upperStatus = (status || 'offline').toUpperCase();
+
+  // Map 'BUSY' to 'DND' (Do Not Disturb)
+  if (upperStatus === 'BUSY') {
+    return 'DND';
+  }
+
+  // Validate and return valid status
+  if (['ONLINE', 'AWAY', 'DND', 'OFFLINE'].includes(upperStatus)) {
+    return upperStatus as PresenceStatus;
+  }
+
+  // Default to OFFLINE for unknown values
+  return 'OFFLINE';
+}
 
 /**
  * Get presence for multiple users
