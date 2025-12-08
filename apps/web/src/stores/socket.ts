@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
+import toast from 'react-hot-toast';
 import { useAuthStore } from './auth';
 import { useChatStore } from './chat';
 
@@ -132,6 +133,26 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         lastMessage: formattedMessage,
         updatedAt: message.createdAt,
       });
+
+      // Show toast notification if message is not for current conversation
+      // and not sent by the current user
+      const currentConversationId = useChatStore.getState().currentConversationId;
+      const currentUserId = useAuthStore.getState().user?.id;
+      const isOwnMessage = message.senderId === currentUserId;
+      const isCurrentConversation = message.conversationId === currentConversationId;
+
+      if (!isOwnMessage && !isCurrentConversation) {
+        const senderName = message.sender?.displayName || message.sender?.name || 'Someone';
+        const messagePreview = message.content?.substring(0, 50) || '[Attachment]';
+        toast(
+          `${senderName}: ${messagePreview}${message.content?.length > 50 ? '...' : ''}`,
+          {
+            icon: '💬',
+            duration: 4000,
+            position: 'top-right',
+          }
+        );
+      }
 
       // Update activity timestamp
       set({ lastActivityAt: Date.now() });
@@ -320,13 +341,15 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   joinConversation: (conversationId) => {
     const { socket } = get();
     if (!socket) return;
-    socket.emit('conversation:join', { conversationId });
+    // Send just the conversationId string, not an object
+    socket.emit('conversation:join', conversationId);
   },
 
   leaveConversation: (conversationId) => {
     const { socket } = get();
     if (!socket) return;
-    socket.emit('conversation:leave', { conversationId });
+    // Send just the conversationId string, not an object
+    socket.emit('conversation:leave', conversationId);
   },
 
   updatePresence: (status, statusMessage) => {

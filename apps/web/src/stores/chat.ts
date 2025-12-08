@@ -104,7 +104,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isLoadingMessages: false,
 
   setConversations: (conversations) => {
-    set({ conversations });
+    // Sort conversations by most recent message/activity
+    const sortedConversations = [...conversations].sort((a, b) => {
+      const aTime = a.lastMessage?.createdAt || a.updatedAt || a.createdAt;
+      const bTime = b.lastMessage?.createdAt || b.updatedAt || b.createdAt;
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
+    });
+    set({ conversations: sortedConversations });
   },
 
   addConversation: (conversation) => {
@@ -114,11 +120,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   updateConversation: (id, updates) => {
-    set((state) => ({
-      conversations: state.conversations.map((c) =>
+    set((state) => {
+      const updatedConversations = state.conversations.map((c) =>
         c.id === id ? { ...c, ...updates } : c
-      ),
-    }));
+      );
+      // Sort conversations by updatedAt (newest first) to show most recent at top
+      updatedConversations.sort((a, b) => {
+        const aTime = a.lastMessage?.createdAt || a.updatedAt || a.createdAt;
+        const bTime = b.lastMessage?.createdAt || b.updatedAt || b.createdAt;
+        return new Date(bTime).getTime() - new Date(aTime).getTime();
+      });
+      return { conversations: updatedConversations };
+    });
   },
 
   removeConversation: (id) => {

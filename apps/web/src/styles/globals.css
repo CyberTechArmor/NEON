@@ -258,15 +258,15 @@
     @apply px-4 py-2.5 rounded-2xl;
     max-width: min(70%, 480px);
     min-width: 60px;
-    /* Improved word breaking - only break on spaces or hyphens */
+    /* Word breaking: only break at word boundaries, not mid-word */
     word-wrap: break-word;
-    overflow-wrap: anywhere;
-    /* Only break words if they exceed the container width */
-    word-break: normal;
-    /* Enable hyphenation for supported languages */
-    hyphens: auto;
-    -webkit-hyphens: auto;
-    /* Ensure proper text rendering */
+    overflow-wrap: break-word;
+    /* Never break words in the middle */
+    word-break: keep-all;
+    /* Disable auto-hyphenation to prevent mid-word breaks */
+    hyphens: none;
+    -webkit-hyphens: none;
+    /* Preserve whitespace and wrap normally */
     white-space: pre-wrap;
   }
 
