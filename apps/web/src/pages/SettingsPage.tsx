@@ -22,9 +22,17 @@ import {
   AlertTriangle,
   Wifi,
   WifiOff,
+  Volume2,
+  VolumeX,
+  BellRing,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { useSocketStore } from '../stores/socket';
+import {
+  useNotificationStore,
+  playNotificationSound,
+  playTestAlertSound,
+} from '../stores/notifications';
 import { usersApi, authApi, filesApi, getErrorMessage, api } from '../lib/api';
 
 // Profile settings
@@ -640,18 +648,28 @@ function SecuritySettings() {
 
 // Notification settings
 function NotificationSettings() {
-  const { isConnected, lastConnectedAt, lastActivityAt, sendTestAlert, activeTestAlert, acknowledgeTestAlert } = useSocketStore();
-  const [settings, setSettings] = useState({
+  const { isConnected, lastActivityAt, sendTestAlert } = useSocketStore();
+  const {
+    soundEnabled,
+    testAlertSoundEnabled,
+    soundVolume,
+    browserNotificationsEnabled,
+    browserPermission,
+    setSoundEnabled,
+    setTestAlertSoundEnabled,
+    setSoundVolume,
+    setBrowserNotificationsEnabled,
+    requestBrowserPermission,
+  } = useNotificationStore();
+
+  const [isSendingAlert, setIsSendingAlert] = useState(false);
+  const [emailSettings, setEmailSettings] = useState({
     emailMessages: true,
     emailMentions: true,
-    pushMessages: false,
-    pushCalls: true,
-    soundEnabled: true,
   });
-  const [isSendingAlert, setIsSendingAlert] = useState(false);
 
-  const toggleSetting = (key: keyof typeof settings) => {
-    setSettings({ ...settings, [key]: !settings[key] });
+  const toggleEmailSetting = (key: keyof typeof emailSettings) => {
+    setEmailSettings({ ...emailSettings, [key]: !emailSettings[key] });
     toast.success('Settings updated');
   };
 
@@ -660,6 +678,23 @@ function NotificationSettings() {
     sendTestAlert();
     toast.success('Test alert sent to all your devices');
     setTimeout(() => setIsSendingAlert(false), 1000);
+  };
+
+  const handleTestMessageSound = () => {
+    playNotificationSound(soundVolume);
+  };
+
+  const handleTestAlertSound = () => {
+    playTestAlertSound(soundVolume);
+  };
+
+  const handleRequestBrowserPermission = async () => {
+    const permission = await requestBrowserPermission();
+    if (permission === 'granted') {
+      toast.success('Browser notifications enabled');
+    } else if (permission === 'denied') {
+      toast.error('Browser notifications were denied. Please enable them in your browser settings.');
+    }
   };
 
   // Calculate connection status
@@ -700,6 +735,144 @@ function NotificationSettings() {
                     : 'Not connected to real-time server'}
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Browser Notifications */}
+        <div>
+          <h3 className="text-lg font-medium mb-4">Browser Notifications</h3>
+          <div className="card p-4">
+            <div className="flex items-start gap-4">
+              <BellRing className="w-6 h-6 text-neon-info flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-medium mb-1">Desktop Notifications</p>
+                <p className="text-sm text-neon-text-muted mb-3">
+                  Receive notifications even when the app is minimized or in the background.
+                  {browserPermission === 'denied' && (
+                    <span className="text-neon-warning block mt-1">
+                      Notifications are blocked in your browser. Please enable them in your browser settings.
+                    </span>
+                  )}
+                </p>
+
+                {browserPermission === 'default' ? (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={handleRequestBrowserPermission}
+                  >
+                    <Bell className="w-4 h-4" />
+                    <span>Enable Browser Notifications</span>
+                  </button>
+                ) : browserPermission === 'granted' ? (
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <span className="text-sm">Browser notifications enabled</span>
+                    <input
+                      type="checkbox"
+                      checked={browserNotificationsEnabled}
+                      onChange={(e) => setBrowserNotificationsEnabled(e.target.checked)}
+                      className="w-5 h-5 rounded border-neon-border bg-neon-surface"
+                    />
+                  </label>
+                ) : (
+                  <p className="text-sm text-neon-text-muted">
+                    To enable notifications, click the lock icon in your browser's address bar and allow notifications.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Sound Settings */}
+        <div>
+          <h3 className="text-lg font-medium mb-4">Sound Notifications</h3>
+          <div className="space-y-3">
+            {/* Message sound toggle */}
+            <div className="card p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  {soundEnabled ? (
+                    <Volume2 className="w-5 h-5 text-neon-success" />
+                  ) : (
+                    <VolumeX className="w-5 h-5 text-neon-text-muted" />
+                  )}
+                  <div>
+                    <p className="font-medium">Message sounds</p>
+                    <p className="text-sm text-neon-text-muted">
+                      Play a sound for new messages
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={soundEnabled}
+                  onChange={(e) => setSoundEnabled(e.target.checked)}
+                  className="w-5 h-5 rounded border-neon-border bg-neon-surface"
+                />
+              </div>
+              {soundEnabled && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleTestMessageSound}
+                >
+                  Test Sound
+                </button>
+              )}
+            </div>
+
+            {/* Test alert sound toggle */}
+            <div className="card p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className={`w-5 h-5 ${testAlertSoundEnabled ? 'text-neon-warning' : 'text-neon-text-muted'}`} />
+                  <div>
+                    <p className="font-medium">Test alert sounds</p>
+                    <p className="text-sm text-neon-text-muted">
+                      Play a sound for test alerts (on by default)
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={testAlertSoundEnabled}
+                  onChange={(e) => setTestAlertSoundEnabled(e.target.checked)}
+                  className="w-5 h-5 rounded border-neon-border bg-neon-surface"
+                />
+              </div>
+              {testAlertSoundEnabled && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleTestAlertSound}
+                >
+                  Test Alert Sound
+                </button>
+              )}
+            </div>
+
+            {/* Volume slider */}
+            <div className="card p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <Volume2 className="w-5 h-5 text-neon-text-muted" />
+                <div className="flex-1">
+                  <p className="font-medium">Volume</p>
+                  <p className="text-sm text-neon-text-muted">
+                    Adjust notification volume
+                  </p>
+                </div>
+                <span className="text-sm text-neon-text-muted w-12 text-right">
+                  {Math.round(soundVolume * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={soundVolume}
+                onChange={(e) => setSoundVolume(parseFloat(e.target.value))}
+                className="w-full h-2 bg-neon-surface-hover rounded-lg appearance-none cursor-pointer"
+              />
             </div>
           </div>
         </div>
@@ -752,8 +925,8 @@ function NotificationSettings() {
               </div>
               <input
                 type="checkbox"
-                checked={settings.emailMessages}
-                onChange={() => toggleSetting('emailMessages')}
+                checked={emailSettings.emailMessages}
+                onChange={() => toggleEmailSetting('emailMessages')}
                 className="w-5 h-5 rounded border-neon-border bg-neon-surface"
               />
             </label>
@@ -767,67 +940,12 @@ function NotificationSettings() {
               </div>
               <input
                 type="checkbox"
-                checked={settings.emailMentions}
-                onChange={() => toggleSetting('emailMentions')}
+                checked={emailSettings.emailMentions}
+                onChange={() => toggleEmailSetting('emailMentions')}
                 className="w-5 h-5 rounded border-neon-border bg-neon-surface"
               />
             </label>
           </div>
-        </div>
-
-        {/* Push notifications */}
-        <div>
-          <h3 className="text-lg font-medium mb-4">Push notifications</h3>
-          <div className="space-y-3">
-            <label className="flex items-center justify-between p-3 card cursor-pointer">
-              <div>
-                <p className="font-medium">Messages</p>
-                <p className="text-sm text-neon-text-muted">
-                  Push notifications for new messages
-                </p>
-              </div>
-              <input
-                type="checkbox"
-                checked={settings.pushMessages}
-                onChange={() => toggleSetting('pushMessages')}
-                className="w-5 h-5 rounded border-neon-border bg-neon-surface"
-              />
-            </label>
-
-            <label className="flex items-center justify-between p-3 card cursor-pointer">
-              <div>
-                <p className="font-medium">Calls</p>
-                <p className="text-sm text-neon-text-muted">
-                  Push notifications for incoming calls
-                </p>
-              </div>
-              <input
-                type="checkbox"
-                checked={settings.pushCalls}
-                onChange={() => toggleSetting('pushCalls')}
-                className="w-5 h-5 rounded border-neon-border bg-neon-surface"
-              />
-            </label>
-          </div>
-        </div>
-
-        {/* Sound */}
-        <div>
-          <h3 className="text-lg font-medium mb-4">Sound</h3>
-          <label className="flex items-center justify-between p-3 card cursor-pointer">
-            <div>
-              <p className="font-medium">Notification sounds</p>
-              <p className="text-sm text-neon-text-muted">
-                Play sounds for notifications
-              </p>
-            </div>
-            <input
-              type="checkbox"
-              checked={settings.soundEnabled}
-              onChange={() => toggleSetting('soundEnabled')}
-              className="w-5 h-5 rounded border-neon-border bg-neon-surface"
-            />
-          </label>
         </div>
       </div>
     </div>

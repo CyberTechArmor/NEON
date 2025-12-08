@@ -93,8 +93,9 @@ export function createSocketServer(httpServer: HttpServer): Server {
     }
     userSockets.get(userId)!.add(socket.id);
 
-    // Join org room
+    // Join org room and personal user room
     socket.join(`org:${orgId}`);
+    socket.join(`user:${userId}`);
 
     // Update presence
     updatePresence(userId, 'ONLINE');
@@ -136,10 +137,12 @@ export function createSocketServer(httpServer: HttpServer): Server {
     // ==========================================================================
 
     socket.on(SocketEvents.CONVERSATION_JOIN, (conversationId) => {
+      console.log(`[Socket] User ${userId} joining conversation:`, conversationId);
       socket.join(`conversation:${conversationId}`);
     });
 
     socket.on(SocketEvents.CONVERSATION_LEAVE, (conversationId) => {
+      console.log(`[Socket] User ${userId} leaving conversation:`, conversationId);
       socket.leave(`conversation:${conversationId}`);
     });
 
@@ -441,7 +444,11 @@ export function broadcastToConversation(
   data: unknown
 ): void {
   if (io) {
-    io.to(`conversation:${conversationId}`).emit(event as any, data as any);
+    const room = `conversation:${conversationId}`;
+    const socketsInRoom = io.sockets.adapter.rooms.get(room);
+    const socketCount = socketsInRoom?.size || 0;
+    console.log(`[Socket] Broadcasting ${event} to room ${room} (${socketCount} sockets)`);
+    io.to(room).emit(event as any, data as any);
   }
 }
 
@@ -455,5 +462,33 @@ export function broadcastToOrg(
 ): void {
   if (io) {
     io.to(`org:${orgId}`).emit(event as any, data as any);
+  }
+}
+
+/**
+ * Broadcast to a specific user (all their connected devices)
+ */
+export function broadcastToUser(
+  userId: string,
+  event: keyof ServerToClientEvents,
+  data: unknown
+): void {
+  if (io) {
+    io.to(`user:${userId}`).emit(event as any, data as any);
+  }
+}
+
+/**
+ * Broadcast to multiple users
+ */
+export function broadcastToUsers(
+  userIds: string[],
+  event: keyof ServerToClientEvents,
+  data: unknown
+): void {
+  if (io) {
+    for (const userId of userIds) {
+      io.to(`user:${userId}`).emit(event as any, data as any);
+    }
   }
 }

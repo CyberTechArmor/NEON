@@ -7,7 +7,7 @@ import { prisma } from '@neon/database';
 import { sendMessageSchema, editMessageSchema, addReactionSchema, cursorPaginationSchema } from '@neon/shared';
 import { NotFoundError, ForbiddenError, FrozenConversationError } from '@neon/shared';
 import { authenticate } from '../middleware/auth';
-import { broadcastToConversation } from '../socket';
+import { broadcastToConversation, broadcastToUsers } from '../socket';
 import { SocketEvents } from '@neon/shared';
 import { AuditService } from '../services/audit';
 
@@ -157,8 +157,22 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       },
     });
 
-    // Broadcast to conversation
+    // Get all participants to broadcast to their personal user rooms
+    // This ensures users receive messages even when not viewing this conversation
+    const participants = await prisma.conversationParticipant.findMany({
+      where: {
+        conversationId,
+        leftAt: null,
+      },
+      select: { userId: true },
+    });
+
+    // Broadcast to conversation room (for users actively viewing)
     broadcastToConversation(conversationId, SocketEvents.MESSAGE_RECEIVED, message);
+
+    // Also broadcast to all participant user rooms (for notifications on any page)
+    const participantUserIds = participants.map((p: { userId: string }) => p.userId);
+    broadcastToUsers(participantUserIds, SocketEvents.MESSAGE_RECEIVED, message);
 
     res.status(201).json({
       success: true,

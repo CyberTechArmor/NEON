@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import { useAuthStore } from './auth';
 import { useChatStore } from './chat';
+import { showMessageNotification, showTestAlertNotification } from './notifications';
 
 // Get WebSocket URL from runtime config (docker), build-time env, or fallback
 const getWsUrl = (): string => {
@@ -116,6 +117,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
     // Message events - use correct event names matching backend SocketEvents
     socket.on('message:received', (message: any) => {
+      console.log('[Socket] Message received via WebSocket:', message);
       // Handle message received event from backend
       const formattedMessage = {
         ...message,
@@ -141,17 +143,26 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       const isOwnMessage = message.senderId === currentUserId;
       const isCurrentConversation = message.conversationId === currentConversationId;
 
-      if (!isOwnMessage && !isCurrentConversation) {
+      // Show notifications for messages not sent by current user
+      if (!isOwnMessage) {
         const senderName = message.sender?.displayName || message.sender?.name || 'Someone';
-        const messagePreview = message.content?.substring(0, 50) || '[Attachment]';
-        toast(
-          `${senderName}: ${messagePreview}${message.content?.length > 50 ? '...' : ''}`,
-          {
-            icon: '💬',
-            duration: 4000,
-            position: 'top-right',
-          }
-        );
+        const messageContent = message.content || '[Attachment]';
+
+        // Show in-app toast if not in the current conversation
+        if (!isCurrentConversation) {
+          const messagePreview = messageContent.substring(0, 50);
+          toast(
+            `${senderName}: ${messagePreview}${messageContent.length > 50 ? '...' : ''}`,
+            {
+              icon: '💬',
+              duration: 4000,
+              position: 'top-right',
+            }
+          );
+        }
+
+        // Show sound + browser notification (handled by notification store settings)
+        showMessageNotification(senderName, messageContent, message.conversationId);
       }
 
       // Update activity timestamp
@@ -277,6 +288,9 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         },
         lastActivityAt: Date.now(),
       });
+
+      // Play sound and show browser notification for test alerts
+      showTestAlertNotification(alert.title, alert.body);
     });
 
     // Test alert acknowledged on another device
@@ -296,63 +310,70 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     }
   },
 
-  sendMessage: (conversationId, content, replyToId) => {
+  sendMessage: (conversationId: string, content: string, replyToId?: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('message:send', { conversationId, content, replyToId });
   },
 
-  editMessage: (messageId, content) => {
+  editMessage: (messageId: string, content: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('message:edit', { messageId, content });
   },
 
-  deleteMessage: (messageId) => {
+  deleteMessage: (messageId: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('message:delete', { messageId });
   },
 
-  addReaction: (messageId, emoji) => {
+  addReaction: (messageId: string, emoji: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('message:react', { messageId, emoji });
   },
 
-  removeReaction: (messageId, emoji) => {
+  removeReaction: (messageId: string, emoji: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('message:unreact', { messageId, emoji });
   },
 
-  sendTyping: (conversationId) => {
+  sendTyping: (conversationId: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('typing:start', { conversationId });
   },
 
-  stopTyping: (conversationId) => {
+  stopTyping: (conversationId: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('typing:stop', { conversationId });
   },
 
-  joinConversation: (conversationId) => {
-    const { socket } = get();
-    if (!socket) return;
-    // Send just the conversationId string, not an object
+  joinConversation: (conversationId: string) => {
+    const { socket, isConnected } = get();
+    if (!socket) {
+      console.warn('[Socket] joinConversation called but socket is null');
+      return;
+    }
+    if (!isConnected) {
+      console.warn('[Socket] joinConversation called but not connected');
+      return;
+    }
+    console.log('[Socket] Joining conversation room:', conversationId);
     socket.emit('conversation:join', conversationId);
   },
 
-  leaveConversation: (conversationId) => {
-    const { socket } = get();
-    if (!socket) return;
-    // Send just the conversationId string, not an object
+  leaveConversation: (conversationId: string) => {
+    const { socket, isConnected } = get();
+    if (!socket || !isConnected) return;
+    console.log('[Socket] Leaving conversation room:', conversationId);
     socket.emit('conversation:leave', conversationId);
   },
 
-  updatePresence: (status, statusMessage) => {
+  updatePresence: (status: string, statusMessage?: string) => {
     const { socket } = get();
     if (!socket) return;
     // Send uppercase status for backend compatibility
@@ -375,8 +396,8 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     return userPresence.status === 'ONLINE' && lastSeen > fiveMinutesAgo;
   },
 
-  addNotification: (notification) => {
-    set((state) => ({
+  addNotification: (notification: Notification) => {
+    set((state: SocketState) => ({
       notifications: [notification, ...state.notifications],
       unreadNotificationCount: notification.read
         ? state.unreadNotificationCount
@@ -384,13 +405,13 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     }));
   },
 
-  markNotificationRead: (id) => {
+  markNotificationRead: (id: string) => {
     const { socket } = get();
     if (socket) {
       socket.emit('notification:read', id);
     }
-    set((state) => ({
-      notifications: state.notifications.map((n) =>
+    set((state: SocketState) => ({
+      notifications: state.notifications.map((n: Notification) =>
         n.id === id ? { ...n, read: true } : n
       ),
       unreadNotificationCount: Math.max(0, state.unreadNotificationCount - 1),
@@ -398,16 +419,16 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   },
 
   markAllNotificationsRead: () => {
-    set((state) => ({
-      notifications: state.notifications.map((n) => ({ ...n, read: true })),
+    set((state: SocketState) => ({
+      notifications: state.notifications.map((n: Notification) => ({ ...n, read: true })),
       unreadNotificationCount: 0,
     }));
   },
 
-  setNotifications: (notifications) => {
+  setNotifications: (notifications: Notification[]) => {
     set({
       notifications,
-      unreadNotificationCount: notifications.filter((n) => !n.read).length,
+      unreadNotificationCount: notifications.filter((n: Notification) => !n.read).length,
     });
   },
 
