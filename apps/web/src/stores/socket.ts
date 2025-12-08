@@ -310,49 +310,49 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     }
   },
 
-  sendMessage: (conversationId, content, replyToId) => {
+  sendMessage: (conversationId: string, content: string, replyToId?: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('message:send', { conversationId, content, replyToId });
   },
 
-  editMessage: (messageId, content) => {
+  editMessage: (messageId: string, content: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('message:edit', { messageId, content });
   },
 
-  deleteMessage: (messageId) => {
+  deleteMessage: (messageId: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('message:delete', { messageId });
   },
 
-  addReaction: (messageId, emoji) => {
+  addReaction: (messageId: string, emoji: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('message:react', { messageId, emoji });
   },
 
-  removeReaction: (messageId, emoji) => {
+  removeReaction: (messageId: string, emoji: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('message:unreact', { messageId, emoji });
   },
 
-  sendTyping: (conversationId) => {
+  sendTyping: (conversationId: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('typing:start', { conversationId });
   },
 
-  stopTyping: (conversationId) => {
+  stopTyping: (conversationId: string) => {
     const { socket } = get();
     if (!socket) return;
     socket.emit('typing:stop', { conversationId });
   },
 
-  joinConversation: (conversationId) => {
+  joinConversation: (conversationId: string) => {
     const { socket, isConnected } = get();
     if (!socket) {
       console.warn('[Socket] joinConversation called but socket is null');
@@ -366,14 +366,14 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     socket.emit('conversation:join', conversationId);
   },
 
-  leaveConversation: (conversationId) => {
+  leaveConversation: (conversationId: string) => {
     const { socket, isConnected } = get();
     if (!socket || !isConnected) return;
     console.log('[Socket] Leaving conversation room:', conversationId);
     socket.emit('conversation:leave', conversationId);
   },
 
-  updatePresence: (status, statusMessage) => {
+  updatePresence: (status: string, statusMessage?: string) => {
     const { socket } = get();
     if (!socket) return;
     // Send uppercase status for backend compatibility
@@ -396,8 +396,8 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     return userPresence.status === 'ONLINE' && lastSeen > fiveMinutesAgo;
   },
 
-  addNotification: (notification) => {
-    set((state) => ({
+  addNotification: (notification: Notification) => {
+    set((state: SocketState) => ({
       notifications: [notification, ...state.notifications],
       unreadNotificationCount: notification.read
         ? state.unreadNotificationCount
@@ -405,13 +405,13 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     }));
   },
 
-  markNotificationRead: (id) => {
+  markNotificationRead: (id: string) => {
     const { socket } = get();
     if (socket) {
       socket.emit('notification:read', id);
     }
-    set((state) => ({
-      notifications: state.notifications.map((n) =>
+    set((state: SocketState) => ({
+      notifications: state.notifications.map((n: Notification) =>
         n.id === id ? { ...n, read: true } : n
       ),
       unreadNotificationCount: Math.max(0, state.unreadNotificationCount - 1),
@@ -419,16 +419,16 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   },
 
   markAllNotificationsRead: () => {
-    set((state) => ({
-      notifications: state.notifications.map((n) => ({ ...n, read: true })),
+    set((state: SocketState) => ({
+      notifications: state.notifications.map((n: Notification) => ({ ...n, read: true })),
       unreadNotificationCount: 0,
     }));
   },
 
-  setNotifications: (notifications) => {
+  setNotifications: (notifications: Notification[]) => {
     set({
       notifications,
-      unreadNotificationCount: notifications.filter((n) => !n.read).length,
+      unreadNotificationCount: notifications.filter((n: Notification) => !n.read).length,
     });
   },
 
