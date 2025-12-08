@@ -43,6 +43,13 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 /**
+ * Generate a cryptographically secure random token
+ */
+export function generateSecureToken(length: number = 32): string {
+  return randomBytes(length).toString('base64url').slice(0, length);
+}
+
+/**
  * Verify a password against a hash
  */
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
