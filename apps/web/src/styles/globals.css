@@ -257,16 +257,15 @@
   .message-bubble {
     @apply px-4 py-2.5 rounded-2xl;
     max-width: min(70%, 480px);
-    min-width: 60px;
-    /* Word breaking: only break at word boundaries, not mid-word */
-    word-wrap: break-word;
+    min-width: fit-content;
+    /* Standard word breaking - only break at spaces/punctuation */
+    word-break: normal;
+    /* Only break long words that exceed container width */
     overflow-wrap: break-word;
-    /* Never break words in the middle */
-    word-break: keep-all;
-    /* Disable auto-hyphenation to prevent mid-word breaks */
+    /* Disable hyphenation to prevent mid-word breaks */
     hyphens: none;
     -webkit-hyphens: none;
-    /* Preserve whitespace and wrap normally */
+    /* Preserve user-entered line breaks, wrap at container boundary */
     white-space: pre-wrap;
   }
 
