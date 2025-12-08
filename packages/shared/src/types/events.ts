@@ -78,6 +78,12 @@ export const SocketEvents = {
   // Freeze
   CONVERSATION_FROZEN: 'conversation:frozen',
   CONVERSATION_UNFROZEN: 'conversation:unfrozen',
+
+  // Test Alerts
+  TEST_ALERT_SEND: 'test:alert:send',
+  TEST_ALERT: 'test:alert',
+  TEST_ALERT_ACKNOWLEDGE: 'test:alert:acknowledge',
+  TEST_ALERT_ACKNOWLEDGED: 'test:alert:acknowledged',
 } as const;
 
 export type SocketEventName = (typeof SocketEvents)[keyof typeof SocketEvents];
@@ -127,6 +133,10 @@ export interface ClientToServerEvents {
 
   // Notifications
   [SocketEvents.NOTIFICATION_READ]: (notificationId: string) => void;
+
+  // Test Alerts
+  [SocketEvents.TEST_ALERT_SEND]: (data: TestAlertSendPayload) => void;
+  [SocketEvents.TEST_ALERT_ACKNOWLEDGE]: (data: TestAlertAcknowledgePayload) => void;
 }
 
 // =============================================================================
@@ -179,6 +189,10 @@ export interface ServerToClientEvents {
 
   // Notifications
   [SocketEvents.NOTIFICATION]: (notification: NotificationPayload) => void;
+
+  // Test Alerts
+  [SocketEvents.TEST_ALERT]: (alert: TestAlertPayload) => void;
+  [SocketEvents.TEST_ALERT_ACKNOWLEDGED]: (data: TestAlertAcknowledgePayload) => void;
 }
 
 // =============================================================================
@@ -308,4 +322,21 @@ export interface NotificationPayload {
 export interface SocketError {
   code: string;
   message: string;
+}
+
+// Test Alert Types
+export interface TestAlertSendPayload {
+  title: string;
+  body: string;
+}
+
+export interface TestAlertPayload {
+  id: string;
+  title: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface TestAlertAcknowledgePayload {
+  id: string;
 }

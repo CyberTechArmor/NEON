@@ -248,7 +248,7 @@ export function createSocketServer(httpServer: HttpServer): Server {
     // Test Alerts
     // ==========================================================================
 
-    socket.on('test:alert:send', async (data: { title: string; body: string }) => {
+    socket.on(SocketEvents.TEST_ALERT_SEND, async (data) => {
       const alertId = `alert-${Date.now()}-${Math.random().toString(36).substring(7)}`;
       const alert = {
         id: alertId,
@@ -260,15 +260,15 @@ export function createSocketServer(httpServer: HttpServer): Server {
       // Send to all user's connected sockets (all devices)
       const sockets = userSockets.get(userId);
       if (sockets && sockets.size > 0) {
-        io!.to(Array.from(sockets)).emit('test:alert', alert);
+        io!.to(Array.from(sockets)).emit(SocketEvents.TEST_ALERT, alert);
       }
     });
 
-    socket.on('test:alert:acknowledge', (data: { id: string }) => {
+    socket.on(SocketEvents.TEST_ALERT_ACKNOWLEDGE, (data) => {
       // Notify all user's devices that the alert was acknowledged
       const sockets = userSockets.get(userId);
       if (sockets && sockets.size > 0) {
-        io!.to(Array.from(sockets)).emit('test:alert:acknowledged', { id: data.id });
+        io!.to(Array.from(sockets)).emit(SocketEvents.TEST_ALERT_ACKNOWLEDGED, { id: data.id });
       }
     });
 
