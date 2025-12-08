@@ -56,9 +56,8 @@ function NewChatModal({
     queryKey: ['users-search', searchQuery],
     queryFn: async () => {
       const response = await usersApi.list({ search: searchQuery, limit: 20 });
-      return (response.data.data || []).filter(
-        (u: UserForChat) => u.id !== currentUser?.id
-      ) as UserForChat[];
+      const userList = (response.data.data || []) as UserForChat[];
+      return userList.filter((u) => u.id !== currentUser?.id);
     },
     enabled: isOpen,
   });
@@ -82,7 +81,7 @@ function NewChatModal({
         name: chatType === 'group' ? groupName.trim() : undefined,
       });
 
-      const conversationId = response.data.data?.id;
+      const conversationId = (response.data.data as { id: string } | undefined)?.id;
       if (conversationId) {
         onCreateConversation(conversationId);
       }
