@@ -466,6 +466,44 @@ const displayName = user?.displayName || user?.name || 'Unknown';
 - Backend uses: `message:received`, `message:edited`, `message:deleted`
 - Frontend must listen to the same event names (not `message:new`)
 
+### Issue: WebSocket Events Not Reaching All User Devices
+
+**Symptom:** Real-time events (messages, test alerts, notifications) don't appear on all logged-in devices for a user, or events stop working after reconnection.
+
+**Cause:** Using in-memory socket ID tracking (`userSockets.get(userId)`) which can become stale or fail to update properly during reconnections.
+
+**Solution:** Use Socket.io room-based broadcasting instead of tracking socket IDs manually. Each user automatically joins a `user:${userId}` room on connection:
+
+```typescript
+// BAD: Manual socket ID tracking
+const sockets = userSockets.get(userId);
+if (sockets && sockets.size > 0) {
+  io.to(Array.from(sockets)).emit('event', data);
+}
+
+// GOOD: Room-based broadcasting
+io.to(`user:${userId}`).emit('event', data);
+```
+
+**Key Points:**
+1. Users automatically join `user:${userId}` room on connection (line 98 in socket/index.ts)
+2. Socket.io manages room membership automatically, handling reconnections
+3. Use `io.to('user:${userId}')` for all user-targeted events (messages, notifications, alerts)
+4. Room broadcasting is more reliable than manual socket ID tracking
+
+**For conversation-wide events:**
+```typescript
+// Get all participants and broadcast to their user rooms
+const participants = await prisma.conversationParticipant.findMany({
+  where: { conversationId, leftAt: null },
+  select: { userId: true },
+});
+
+for (const participant of participants) {
+  io.to(`user:${participant.userId}`).emit(event, data);
+}
+```
+
 ### Issue: S3 Storage Secret Key Not Persisting
 
 **Symptom:** S3 connection works during test but fails later; credentials appear lost.

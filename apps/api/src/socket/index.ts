@@ -260,19 +260,18 @@ export function createSocketServer(httpServer: HttpServer): Server {
         createdAt: new Date().toISOString(),
       };
 
-      // Send to all user's connected sockets (all devices)
-      const sockets = userSockets.get(userId);
-      if (sockets && sockets.size > 0) {
-        io!.to(Array.from(sockets)).emit(SocketEvents.TEST_ALERT, alert);
-      }
+      console.log(`[Socket] Sending test alert to user:${userId} room`);
+
+      // Send to user's room (all their connected devices automatically join this room)
+      // Using room-based broadcasting is more reliable than tracking socket IDs
+      io!.to(`user:${userId}`).emit(SocketEvents.TEST_ALERT, alert);
     });
 
     socket.on(SocketEvents.TEST_ALERT_ACKNOWLEDGE, (data) => {
-      // Notify all user's devices that the alert was acknowledged
-      const sockets = userSockets.get(userId);
-      if (sockets && sockets.size > 0) {
-        io!.to(Array.from(sockets)).emit(SocketEvents.TEST_ALERT_ACKNOWLEDGED, { id: data.id });
-      }
+      console.log(`[Socket] Test alert acknowledged by user:${userId}`);
+
+      // Notify all user's devices that the alert was acknowledged via user room
+      io!.to(`user:${userId}`).emit(SocketEvents.TEST_ALERT_ACKNOWLEDGED, { id: data.id });
     });
 
     // ==========================================================================
@@ -410,7 +409,8 @@ async function getPresenceForUsers(
 }
 
 /**
- * Send notification to user
+ * Send notification to user via their user room
+ * Users automatically join their user room on connection
  */
 export async function sendNotification(
   userId: string,
@@ -423,15 +423,13 @@ export async function sendNotification(
   }
 ): Promise<void> {
   if (io) {
-    const sockets = userSockets.get(userId);
-    if (sockets && sockets.size > 0) {
-      io.to(Array.from(sockets)).emit(SocketEvents.NOTIFICATION, {
-        ...notification,
-        body: notification.body ?? null,
-        data: notification.data ?? null,
-        createdAt: new Date().toISOString(),
-      });
-    }
+    console.log(`[Socket] Sending notification to user:${userId} room`);
+    io.to(`user:${userId}`).emit(SocketEvents.NOTIFICATION, {
+      ...notification,
+      body: notification.body ?? null,
+      data: notification.data ?? null,
+      createdAt: new Date().toISOString(),
+    });
   }
 }
 
@@ -454,8 +452,9 @@ export function broadcastToConversation(
 }
 
 /**
- * Broadcast to conversation using direct socket IDs
- * This is more reliable than room-based broadcasting
+ * Broadcast to conversation participants using user rooms
+ * Each user automatically joins their user room (user:${userId}) on connection
+ * This is more reliable than tracking socket IDs in memory
  */
 export async function broadcastToConversationParticipants(
   conversationId: string,
@@ -475,19 +474,14 @@ export async function broadcastToConversationParticipants(
     });
 
     const participantIds = participants.map(p => p.userId);
-    let totalSocketsNotified = 0;
 
-    // Broadcast to each participant's sockets directly (like test alerts)
-    for (const userId of participantIds) {
-      const sockets = userSockets.get(userId);
-      if (sockets && sockets.size > 0) {
-        const socketIds = Array.from(sockets);
-        io.to(socketIds).emit(event as any, data as any);
-        totalSocketsNotified += socketIds.length;
-      }
+    // Broadcast to each participant via their user room
+    // Users automatically join their user room on connection, so this is reliable
+    for (const participantUserId of participantIds) {
+      io.to(`user:${participantUserId}`).emit(event as any, data as any);
     }
 
-    console.log(`[Socket] Broadcasting ${String(event)} to ${participantIds.length} participants (${totalSocketsNotified} sockets) for conversation ${conversationId}`);
+    console.log(`[Socket] Broadcasting ${String(event)} to ${participantIds.length} user rooms for conversation ${conversationId}`);
   } catch (error) {
     console.error(`[Socket] Error broadcasting to conversation participants:`, error);
   }
