@@ -369,7 +369,7 @@ router.post('/mfa/verify', authenticate, async (req: Request, res: Response, nex
       },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
