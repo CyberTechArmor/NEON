@@ -8,6 +8,8 @@ import { createConversationSchema, updateConversationSchema, addParticipantsSche
 import { authenticate } from '../middleware/auth';
 import { canCommunicate, canFreeze } from '../services/permissions';
 import { AuditService } from '../services/audit';
+import { broadcastToConversation, broadcastToConversationParticipants } from '../socket';
+import { SocketEvents } from '@neon/shared';
 import { CHAT_LIMITS } from '@neon/shared';
 
 const router = Router();
@@ -516,6 +518,12 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
       details: { conversationId: req.params.id },
       ipAddress: req.ip,
     });
+
+    // Broadcast message to all conversation participants via Socket.IO for real-time delivery
+    console.log(`[Conversations API] Broadcasting new message ${message.id} in conversation ${req.params.id}`);
+    await broadcastToConversationParticipants(req.params.id, SocketEvents.MESSAGE_RECEIVED, message);
+    broadcastToConversation(req.params.id, SocketEvents.MESSAGE_RECEIVED, message);
+    console.log(`[Conversations API] Broadcast complete for message ${message.id}`);
 
     res.status(201).json({
       success: true,
