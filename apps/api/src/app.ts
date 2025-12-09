@@ -28,6 +28,7 @@ import { filesRouter } from './api/files';
 import { notificationsRouter } from './api/notifications';
 import { adminRouter } from './api/admin';
 import { webhooksRouter } from './api/webhooks';
+import { eventsRouter } from './api/events';
 
 const config = getConfig();
 
@@ -67,7 +68,7 @@ export function createApp(): Express {
       origin: config.api.corsOrigins,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-API-Key'],
       exposedHeaders: ['X-Request-ID', 'X-RateLimit-Remaining'],
     })
   );
@@ -213,6 +214,9 @@ export function createApp(): Express {
 
   // Webhooks (for LiveKit, etc.)
   apiRouter.use('/webhooks', webhooksRouter);
+
+  // Events API (for real-time event publishing via API key / webhooks)
+  apiRouter.use('/events', eventsRouter);
 
   // Mount API router at /api (not /api/v1 to match frontend expectations)
   app.use('/api', apiRouter);

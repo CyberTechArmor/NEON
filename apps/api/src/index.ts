@@ -10,6 +10,7 @@ import { connectDatabase, disconnectDatabase } from '@neon/database';
 import { createApp } from './app';
 import { createSocketServer } from './socket';
 import { connectRedis, disconnectRedis } from './services/redis';
+import { initializeEventBus, shutdownEventBus } from './services/eventbus';
 import { startJobScheduler, stopJobScheduler } from './jobs';
 
 const config = getConfig();
@@ -41,6 +42,10 @@ async function main() {
   // Connect to Redis
   console.log('[Redis] Connecting...');
   await connectRedis();
+
+  // Initialize EventBus (for real-time messaging)
+  console.log('[EventBus] Initializing...');
+  await initializeEventBus();
 
   // Create Express app
   const app = createApp();
@@ -78,6 +83,10 @@ async function main() {
         console.log('[Jobs] Stopping scheduler...');
         stopJobScheduler();
       }
+
+      // Shutdown EventBus
+      console.log('[EventBus] Shutting down...');
+      await shutdownEventBus();
 
       // Disconnect from Redis
       console.log('[Redis] Disconnecting...');

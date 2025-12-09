@@ -456,67 +456,103 @@ docker compose build --no-cache
 const displayName = user?.displayName || user?.name || 'Unknown';
 ```
 
-### Issue: Real-Time Messages Not Appearing Without Refresh
+### Real-Time Messaging Architecture
 
-**Symptom:** Messages don't appear in real-time; page refresh required to see new messages. Same user in two browsers doesn't see messages sync. No message notifications.
+NEON uses an EventBus-based architecture for real-time messaging that separates concerns:
+- **EventBus**: Handles cross-instance event propagation (InMemory or RabbitMQ)
+- **Socket.io**: Handles client connections and event delivery
+- **Redis**: Used ONLY for caching (presence, sessions) - NOT for pub/sub messaging
 
-**Cause:** When using Socket.io with Redis adapter for horizontal scaling, room-based broadcasting (`io.to(room).emit()`) from HTTP route handlers may not reliably deliver messages. The Redis pub/sub mechanism can fail to propagate events emitted from non-socket contexts.
-
-**Solution:** Use direct socket emission by tracking socket IDs in memory and emitting directly to each socket. This bypasses the room/Redis adapter mechanism for reliable delivery:
-
-```typescript
-// Track socket IDs when users connect
-const userSockets = new Map<string, Set<string>>();
-
-// On connection
-userSockets.get(userId)!.add(socket.id);
-
-// Direct socket emission (RELIABLE)
-const socketIds = userSockets.get(userId);
-if (socketIds && socketIds.size > 0) {
-  for (const socketId of socketIds) {
-    const socket = io.sockets.sockets.get(socketId);
-    if (socket) {
-      socket.emit('message:received', data);
-    }
-  }
-}
+**Architecture Overview:**
+```
++-------------------+     +------------------+     +-------------------+
+|   HTTP Routes     |     |    Socket.io     |     |  External Apps    |
+|   (REST API)      |     |    Server        |     |  (Webhooks/API)   |
++--------+----------+     +--------+---------+     +--------+----------+
+         |                         |                        |
+         v                         v                        v
++------------------------------------------------------------------------+
+|                           Event Bus Service                             |
+|  - publish(event, payload)  |  - InMemory adapter (single instance)    |
+|  - subscribe(event, handler)|  - RabbitMQ adapter (multi-instance)     |
++------------------------------------------------------------------------+
 ```
 
-**Key Points:**
-1. Users are tracked in the `userSockets` Map when they connect (socket/index.ts)
-2. On disconnect, socket IDs are removed from tracking
-3. For message delivery, iterate through each user's socket IDs and emit directly
-4. This ensures messages reach all connected browsers/devices for a user
-5. Works regardless of whether user has "joined" a conversation room
+**Key Files:**
+- `apps/api/src/services/eventbus.ts` - EventBus service with adapter pattern
+- `apps/api/src/socket/index.ts` - Socket.io server and event delivery
+- `apps/api/src/api/events.ts` - REST API for external event publishing
+- `apps/api/src/middleware/apiKey.ts` - API key authentication for webhooks
 
-**For conversation-wide events (messages, edits, reactions):**
-```typescript
-// broadcastToConversationParticipants in socket/index.ts
-const participants = await prisma.conversationParticipant.findMany({
-  where: { conversationId, leftAt: null },
-  select: { userId: true },
-});
+**Configuration:**
+```bash
+# EventBus adapter selection (default: inmemory)
+EVENTBUS_ADAPTER=inmemory  # or 'rabbitmq'
 
-for (const participant of participants) {
-  const socketIds = userSockets.get(participant.userId);
-  if (socketIds) {
-    for (const socketId of socketIds) {
-      const socket = io.sockets.sockets.get(socketId);
-      if (socket) {
-        socket.emit(event, data);
-      }
-    }
-  }
-}
+# RabbitMQ URL (required if adapter is 'rabbitmq')
+RABBITMQ_URL=amqp://localhost:5672
+```
+
+**How Events Flow:**
+1. HTTP route creates message in database
+2. Route calls `broadcastToConversationParticipants(conversationId, event, data)`
+3. EventBus publishes event with target user IDs
+4. Socket.io server receives event and delivers to connected clients
+5. For multi-instance deployments, RabbitMQ propagates events across instances
+
+**External Integration via API:**
+External systems can trigger real-time events via the Events API:
+```bash
+# Send notification via API key
+curl -X POST https://api.example.com/api/events/notification \
+  -H "X-API-Key: neon_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "user-uuid", "notification": {"type": "alert", "title": "New Update"}}'
+
+# Broadcast custom event
+curl -X POST https://api.example.com/api/events/broadcast \
+  -H "X-API-Key: neon_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"target": {"type": "user", "userId": "user-uuid"}, "event": "custom:event", "data": {}}'
+
+# Webhook endpoint for external services
+curl -X POST https://api.example.com/api/events/webhook \
+  -H "X-API-Key: neon_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"type": "notification", "data": {"userId": "user-uuid", "title": "External Alert"}}'
 ```
 
 **Frontend expects these events:**
 - `message:received` - New message in conversation
 - `message:edited` - Message was edited
 - `message:deleted` - Message was deleted
+- `message:reaction:added` - Reaction added to message
+- `message:reaction:removed` - Reaction removed from message
 - `notification` - General notifications
-- `test:alert` - Test alerts (working as reference implementation)
+- `test:alert` - Test alerts
+- `conversation:created` - New conversation created
+- `conversation:updated` - Conversation updated
+
+### Issue: Real-Time Messages Not Appearing Without Refresh
+
+**Symptom:** Messages don't appear in real-time; page refresh required to see new messages.
+
+**Debugging Steps:**
+1. Check browser console for WebSocket connection status
+2. Check API server logs for EventBus initialization
+3. Verify EventBus adapter is configured correctly
+4. Check if user sockets are tracked (look for `[Socket] User connected` logs)
+
+**Solution:** The EventBus architecture handles this automatically by:
+1. Tracking connected sockets per user in memory
+2. Publishing events to EventBus for cross-instance delivery
+3. Emitting directly to same-instance sockets for immediate delivery
+
+**Key Points:**
+1. Users are tracked in the `userSockets` Map when they connect
+2. Events are published to EventBus AND emitted directly to local sockets
+3. For multi-instance deployments, enable RabbitMQ adapter
+4. Messages reach all connected browsers/devices for a user
 
 ### Issue: S3 Storage Secret Key Not Persisting
 
