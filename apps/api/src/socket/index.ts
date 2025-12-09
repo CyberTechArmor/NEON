@@ -1,7 +1,12 @@
 /**
  * Socket.io Server
  *
- * Real-time communication for chat, presence, and notifications
+ * Real-time communication for chat, presence, and notifications.
+ *
+ * Architecture:
+ * - Uses EventBus for cross-instance event propagation (InMemory or RabbitMQ)
+ * - Direct socket tracking for reliable message delivery
+ * - Redis is used ONLY for caching (presence, sessions) - NOT for pub/sub messaging
  */
 
 import { Server as HttpServer } from 'http';
@@ -9,21 +14,24 @@ import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { getConfig } from '@neon/config';
 import { prisma } from '@neon/database';
-import { getRedis, getPublisher, getSubscriber, publish } from '../services/redis';
+import { getRedis } from '../services/redis';
+import { subscribeToEvents, publishEvent } from '../services/eventbus';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
   AccessTokenPayload,
 } from '@neon/shared';
 import { SocketEvents } from '@neon/shared';
-import { createAdapter } from '@socket.io/redis-adapter';
 
 const config = getConfig();
 
 let io: Server<ClientToServerEvents, ServerToClientEvents> | null = null;
 
-// User socket mapping
+// User socket mapping - tracks all connected sockets per user
 const userSockets = new Map<string, Set<string>>();
+
+// Socket to user mapping - for quick reverse lookup
+const socketToUser = new Map<string, string>();
 
 /**
  * Create and configure Socket.io server
@@ -39,10 +47,11 @@ export function createSocketServer(httpServer: HttpServer): Server {
     transports: ['websocket', 'polling'],
   });
 
-  // Use Redis adapter for horizontal scaling
-  const pubClient = getPublisher();
-  const subClient = getSubscriber().duplicate();
-  io.adapter(createAdapter(pubClient, subClient));
+  // NOTE: Removed Redis adapter - using EventBus for cross-instance messaging
+  // This provides more reliable message delivery and cleaner architecture
+
+  // Subscribe to EventBus events and deliver to connected clients
+  setupEventBusSubscriptions();
 
   // Authentication middleware
   io.use(async (socket, next) => {
@@ -85,22 +94,22 @@ export function createSocketServer(httpServer: HttpServer): Server {
     const userId = socket.data.userId as string;
     const orgId = socket.data.orgId as string;
 
-    console.log(`[Socket] User connected: ${userId}`);
+    console.log(`[Socket] User connected: ${userId} (socket: ${socket.id})`);
 
     // Track socket
     if (!userSockets.has(userId)) {
       userSockets.set(userId, new Set());
     }
     userSockets.get(userId)!.add(socket.id);
+    socketToUser.set(socket.id, userId);
 
     // Join org room and personal user room
     socket.join(`org:${orgId}`);
     socket.join(`user:${userId}`);
 
-    // Verify room membership
-    const userRoom = io!.sockets.adapter.rooms.get(`user:${userId}`);
-    console.log(`[Socket] User ${userId} joined room user:${userId}, room now has ${userRoom?.size || 0} sockets`);
-    console.log(`[Socket] Socket ${socket.id} rooms:`, Array.from(socket.rooms));
+    // Log room membership for debugging
+    console.log(`[Socket] User ${userId} joined rooms: org:${orgId}, user:${userId}`);
+    console.log(`[Socket] User ${userId} now has ${userSockets.get(userId)?.size || 0} active connections`);
 
     // Update presence
     updatePresence(userId, 'ONLINE');
@@ -113,18 +122,14 @@ export function createSocketServer(httpServer: HttpServer): Server {
     // ==========================================================================
 
     socket.on(SocketEvents.PRESENCE_UPDATE, async (data) => {
-      // Normalize status to uppercase for Prisma enum compatibility
       const normalizedStatus = normalizePresenceStatus(data.status);
       await updatePresence(userId, normalizedStatus, data.message);
     });
 
     socket.on(SocketEvents.PRESENCE_SUBSCRIBE, async (userIds) => {
-      // Subscribe to presence updates for specific users
       for (const uid of userIds) {
         socket.join(`presence:${uid}`);
       }
-
-      // Send current presence for requested users
       const presenceData = await getPresenceForUsers(userIds);
       for (const presence of presenceData) {
         socket.emit(SocketEvents.PRESENCE_UPDATE, presence);
@@ -142,25 +147,24 @@ export function createSocketServer(httpServer: HttpServer): Server {
     // ==========================================================================
 
     socket.on(SocketEvents.CONVERSATION_JOIN, (conversationId) => {
-      console.log(`[Socket] User ${userId} joining conversation:`, conversationId);
+      console.log(`[Socket] User ${userId} joining conversation: ${conversationId}`);
       socket.join(`conversation:${conversationId}`);
     });
 
     socket.on(SocketEvents.CONVERSATION_LEAVE, (conversationId) => {
-      console.log(`[Socket] User ${userId} leaving conversation:`, conversationId);
+      console.log(`[Socket] User ${userId} leaving conversation: ${conversationId}`);
       socket.leave(`conversation:${conversationId}`);
     });
 
     // ==========================================================================
-    // Messages
+    // Messages (socket-based sending - optional, API is preferred)
     // ==========================================================================
 
     socket.on(SocketEvents.MESSAGE_SEND, async (data, callback) => {
       try {
-        // TODO: Implement message sending
-        // This would call the message service to create and broadcast the message
-
-        callback({ success: true, tempId: data.tempId, message: undefined });
+        // Note: This is a placeholder - actual message creation should go through REST API
+        // for proper validation, persistence, and business logic
+        callback({ success: false, tempId: data.tempId, error: 'Please use REST API for sending messages' });
       } catch (error) {
         callback({
           success: false,
@@ -171,7 +175,7 @@ export function createSocketServer(httpServer: HttpServer): Server {
     });
 
     // ==========================================================================
-    // Typing Indicators
+    // Typing Indicators (direct socket-to-socket, no persistence needed)
     // ==========================================================================
 
     socket.on(SocketEvents.TYPING_START, (conversationId) => {
@@ -197,7 +201,6 @@ export function createSocketServer(httpServer: HttpServer): Server {
     // ==========================================================================
 
     socket.on(SocketEvents.MESSAGE_READ, async (data) => {
-      // TODO: Implement read receipt tracking
       socket.to(`conversation:${data.conversationId}`).emit(SocketEvents.READ_RECEIPT, {
         userId,
         messageId: data.messageId,
@@ -211,7 +214,6 @@ export function createSocketServer(httpServer: HttpServer): Server {
 
     socket.on(SocketEvents.CALL_INITIATE, async (data, callback) => {
       try {
-        // TODO: Implement call initiation via LiveKit service
         callback({ success: false, error: 'Calls not yet implemented' });
       } catch (error) {
         callback({
@@ -223,7 +225,6 @@ export function createSocketServer(httpServer: HttpServer): Server {
 
     socket.on(SocketEvents.CALL_ANSWER, async (callId, callback) => {
       try {
-        // TODO: Implement call answering
         callback({ success: false, error: 'Calls not yet implemented' });
       } catch (error) {
         callback({
@@ -265,18 +266,15 @@ export function createSocketServer(httpServer: HttpServer): Server {
         createdAt: new Date().toISOString(),
       };
 
-      console.log(`[Socket] Sending test alert to user:${userId} room`);
+      console.log(`[Socket] Sending test alert to user ${userId}`);
 
-      // Send to user's room (all their connected devices automatically join this room)
-      // Using room-based broadcasting is more reliable than tracking socket IDs
-      io!.to(`user:${userId}`).emit(SocketEvents.TEST_ALERT, alert);
+      // Emit directly to all user's sockets
+      emitToUser(userId, SocketEvents.TEST_ALERT, alert);
     });
 
     socket.on(SocketEvents.TEST_ALERT_ACKNOWLEDGE, (data) => {
-      console.log(`[Socket] Test alert acknowledged by user:${userId}`);
-
-      // Notify all user's devices that the alert was acknowledged via user room
-      io!.to(`user:${userId}`).emit(SocketEvents.TEST_ALERT_ACKNOWLEDGED, { id: data.id });
+      console.log(`[Socket] Test alert acknowledged by user ${userId}`);
+      emitToUser(userId, SocketEvents.TEST_ALERT_ACKNOWLEDGED, { id: data.id });
     });
 
     // ==========================================================================
@@ -297,9 +295,10 @@ export function createSocketServer(httpServer: HttpServer): Server {
             if (!userSockets.has(userId) || userSockets.get(userId)!.size === 0) {
               await updatePresence(userId, 'OFFLINE');
             }
-          }, 5000); // 5 second delay before marking offline
+          }, 5000);
         }
       }
+      socketToUser.delete(socket.id);
     });
   });
 
@@ -307,10 +306,109 @@ export function createSocketServer(httpServer: HttpServer): Server {
 }
 
 /**
+ * Setup EventBus subscriptions to receive events and deliver to clients
+ */
+function setupEventBusSubscriptions(): void {
+  // Subscribe to all events and route to appropriate clients
+  subscribeToEvents('*', (event, payload, metadata) => {
+    console.log(`[Socket] EventBus received: ${event}`);
+    handleEventBusMessage(event, payload as Record<string, unknown>);
+  });
+
+  // Subscribe to specific message events for better routing
+  subscribeToEvents('message:*', (event, payload, metadata) => {
+    handleEventBusMessage(event, payload as Record<string, unknown>);
+  });
+
+  subscribeToEvents('notification', (event, payload, metadata) => {
+    handleEventBusMessage(event, payload as Record<string, unknown>);
+  });
+
+  subscribeToEvents('conversation:*', (event, payload, metadata) => {
+    handleEventBusMessage(event, payload as Record<string, unknown>);
+  });
+
+  console.log('[Socket] EventBus subscriptions configured');
+}
+
+/**
+ * Handle messages received from EventBus and route to appropriate clients
+ */
+function handleEventBusMessage(event: string, payload: Record<string, unknown>): void {
+  if (!io) return;
+
+  // Route based on event type
+  switch (event) {
+    case SocketEvents.MESSAGE_RECEIVED:
+    case SocketEvents.MESSAGE_EDITED:
+    case SocketEvents.MESSAGE_DELETED:
+    case SocketEvents.MESSAGE_REACTION_ADDED:
+    case SocketEvents.MESSAGE_REACTION_REMOVED:
+      // Message events - broadcast to conversation participants
+      if (payload.conversationId && payload.targetUserIds) {
+        const userIds = payload.targetUserIds as string[];
+        for (const userId of userIds) {
+          emitToUser(userId, event as keyof ServerToClientEvents, payload);
+        }
+      } else if (payload.conversationId) {
+        // Fallback: emit to conversation room
+        io.to(`conversation:${payload.conversationId}`).emit(event as any, payload);
+      }
+      break;
+
+    case SocketEvents.NOTIFICATION:
+      // Notification - send to specific user
+      if (payload.userId) {
+        emitToUser(payload.userId as string, event as keyof ServerToClientEvents, payload);
+      }
+      break;
+
+    case SocketEvents.CONVERSATION_CREATED:
+    case SocketEvents.CONVERSATION_UPDATED:
+      // Conversation events - broadcast to participants
+      if (payload.targetUserIds) {
+        const userIds = payload.targetUserIds as string[];
+        for (const userId of userIds) {
+          emitToUser(userId, event as keyof ServerToClientEvents, payload);
+        }
+      }
+      break;
+
+    default:
+      // Unknown event - log for debugging
+      console.log(`[Socket] Unhandled EventBus event: ${event}`);
+  }
+}
+
+/**
  * Get Socket.io server instance
  */
 export function getSocketServer(): Server | null {
   return io;
+}
+
+/**
+ * Emit an event to all of a user's connected sockets
+ */
+function emitToUser(userId: string, event: keyof ServerToClientEvents, data: unknown): void {
+  if (!io) return;
+
+  const socketIds = userSockets.get(userId);
+  if (socketIds && socketIds.size > 0) {
+    console.log(`[Socket] Emitting ${String(event)} to user ${userId} (${socketIds.size} sockets)`);
+    for (const socketId of socketIds) {
+      const socket = io.sockets.sockets.get(socketId);
+      if (socket) {
+        socket.emit(event as any, data as any);
+      } else {
+        // Clean up stale socket reference
+        socketIds.delete(socketId);
+        socketToUser.delete(socketId);
+      }
+    }
+  } else {
+    console.log(`[Socket] User ${userId} has no active sockets`);
+  }
 }
 
 /**
@@ -332,16 +430,20 @@ async function updatePresence(
     },
   });
 
-  // Cache presence in Redis for quick lookups
-  const redis = getRedis();
-  await redis.hset(`presence:${userId}`, {
-    status,
-    message: message ?? '',
-    lastActiveAt: now.toISOString(),
-  });
-  await redis.expire(`presence:${userId}`, 3600); // 1 hour expiry
+  // Cache presence in Redis for quick lookups (Redis is still used for caching)
+  try {
+    const redis = getRedis();
+    await redis.hset(`presence:${userId}`, {
+      status,
+      message: message ?? '',
+      lastActiveAt: now.toISOString(),
+    });
+    await redis.expire(`presence:${userId}`, 3600);
+  } catch (error) {
+    console.warn('[Socket] Failed to cache presence in Redis:', error);
+  }
 
-  // Broadcast to subscribers
+  // Broadcast to presence subscribers
   if (io) {
     io.to(`presence:${userId}`).emit(SocketEvents.PRESENCE_UPDATE, {
       userId,
@@ -355,23 +457,14 @@ async function updatePresence(
 type PresenceStatus = 'ONLINE' | 'AWAY' | 'DND' | 'OFFLINE';
 
 /**
- * Normalize presence status string to Prisma enum format (uppercase)
- * Handles lowercase values from frontend and 'busy' -> 'DND' mapping
+ * Normalize presence status string to Prisma enum format
  */
 function normalizePresenceStatus(status: string): PresenceStatus {
   const upperStatus = (status || 'offline').toUpperCase();
-
-  // Map 'BUSY' to 'DND' (Do Not Disturb)
-  if (upperStatus === 'BUSY') {
-    return 'DND';
-  }
-
-  // Validate and return valid status
+  if (upperStatus === 'BUSY') return 'DND';
   if (['ONLINE', 'AWAY', 'DND', 'OFFLINE'].includes(upperStatus)) {
     return upperStatus as PresenceStatus;
   }
-
-  // Default to OFFLINE for unknown values
   return 'OFFLINE';
 }
 
@@ -381,41 +474,49 @@ function normalizePresenceStatus(status: string): PresenceStatus {
 async function getPresenceForUsers(
   userIds: string[]
 ): Promise<Array<{ userId: string; status: PresenceStatus; message?: string; lastActiveAt?: string }>> {
-  const redis = getRedis();
   const results = [];
 
   for (const userId of userIds) {
-    const presence = await redis.hgetall(`presence:${userId}`);
-    if (presence.status) {
-      results.push({
-        userId,
-        status: presence.status as PresenceStatus,
-        message: presence.message || undefined,
-        lastActiveAt: presence.lastActiveAt,
-      });
-    } else {
-      // Fallback to database
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { presenceStatus: true, presenceMessage: true, lastActiveAt: true },
-      });
-      if (user) {
+    try {
+      const redis = getRedis();
+      const presence = await redis.hgetall(`presence:${userId}`);
+      if (presence.status) {
         results.push({
           userId,
-          status: user.presenceStatus,
-          message: user.presenceMessage ?? undefined,
-          lastActiveAt: user.lastActiveAt?.toISOString(),
+          status: presence.status as PresenceStatus,
+          message: presence.message || undefined,
+          lastActiveAt: presence.lastActiveAt,
         });
+        continue;
       }
+    } catch (error) {
+      // Redis unavailable, fall through to database
+    }
+
+    // Fallback to database
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { presenceStatus: true, presenceMessage: true, lastActiveAt: true },
+    });
+    if (user) {
+      results.push({
+        userId,
+        status: user.presenceStatus,
+        message: user.presenceMessage ?? undefined,
+        lastActiveAt: user.lastActiveAt?.toISOString(),
+      });
     }
   }
 
   return results;
 }
 
+// =============================================================================
+// Export Functions for HTTP Routes
+// =============================================================================
+
 /**
  * Send notification to user via direct socket emission
- * Uses the userSockets map for reliable delivery
  */
 export async function sendNotification(
   userId: string,
@@ -427,12 +528,6 @@ export async function sendNotification(
     data?: Record<string, unknown>;
   }
 ): Promise<void> {
-  if (!io) {
-    console.error(`[Socket] Cannot send notification to user ${userId}: io is null`);
-    return;
-  }
-
-  const socketIds = userSockets.get(userId);
   const notificationPayload = {
     ...notification,
     body: notification.body ?? null,
@@ -440,25 +535,18 @@ export async function sendNotification(
     createdAt: new Date().toISOString(),
   };
 
-  if (socketIds && socketIds.size > 0) {
-    console.log(`[Socket] Sending notification to user ${userId} (${socketIds.size} sockets)`);
-    for (const socketId of socketIds) {
-      const socket = io.sockets.sockets.get(socketId);
-      if (socket) {
-        socket.emit(SocketEvents.NOTIFICATION, notificationPayload);
-      } else {
-        socketIds.delete(socketId);
-      }
-    }
-  } else {
-    console.log(`[Socket] User ${userId} has no active sockets for notification`);
-  }
+  // Publish to EventBus for cross-instance delivery
+  await publishEvent(SocketEvents.NOTIFICATION, {
+    userId,
+    ...notificationPayload,
+  });
+
+  // Also emit directly for same-instance delivery
+  emitToUser(userId, SocketEvents.NOTIFICATION, notificationPayload);
 }
 
 /**
- * Broadcast to conversation room
- * This is for users who have actively joined the conversation room
- * (used as a secondary delivery mechanism)
+ * Broadcast to conversation room (secondary delivery mechanism)
  */
 export function broadcastToConversation(
   conversationId: string,
@@ -473,36 +561,29 @@ export function broadcastToConversation(
   const room = `conversation:${conversationId}`;
   const socketsInRoom = io.sockets.adapter.rooms.get(room);
   const socketCount = socketsInRoom?.size || 0;
-  console.log(`[Socket] Broadcasting ${String(event)} to conversation room ${room} (${socketCount} sockets in room)`);
+
+  console.log(`[Socket] Broadcasting ${String(event)} to conversation room ${room} (${socketCount} sockets)`);
 
   if (socketCount > 0) {
-    // Also emit directly to the sockets in the room for reliability
     for (const socketId of socketsInRoom!) {
       const socket = io.sockets.sockets.get(socketId);
       if (socket) {
         socket.emit(event as any, data as any);
-        console.log(`[Socket] Emitted ${String(event)} directly to socket ${socketId} in conversation room`);
       }
     }
   }
 }
 
 /**
- * Broadcast to conversation participants using direct socket emission
- * This bypasses rooms and emits directly to tracked socket IDs for reliability
+ * Broadcast to conversation participants using EventBus + direct socket emission
+ * This is the PRIMARY method for delivering messages reliably
  */
 export async function broadcastToConversationParticipants(
   conversationId: string,
   event: keyof ServerToClientEvents,
   data: unknown
 ): Promise<void> {
-  console.log(`[Socket] broadcastToConversationParticipants called for conversation ${conversationId}, event: ${String(event)}`);
-  console.log(`[Socket] io instance exists: ${!!io}`);
-
-  if (!io) {
-    console.error(`[Socket] ERROR: io is null! Cannot broadcast ${String(event)}`);
-    return;
-  }
+  console.log(`[Socket] broadcastToConversationParticipants: ${conversationId}, event: ${String(event)}`);
 
   try {
     // Get all participants of the conversation
@@ -514,36 +595,35 @@ export async function broadcastToConversationParticipants(
       select: { userId: true },
     });
 
-    const participantIds = participants.map(p => p.userId);
+    const participantIds = participants.map((p: { userId: string }) => p.userId);
     console.log(`[Socket] Found ${participantIds.length} participants:`, participantIds);
 
+    // Publish to EventBus with target user IDs for cross-instance delivery
+    await publishEvent(event, {
+      ...(data as Record<string, unknown>),
+      conversationId,
+      targetUserIds: participantIds,
+    });
+
+    // Also emit directly to same-instance sockets for immediate delivery
     let totalSocketsEmitted = 0;
-
-    // Emit directly to each participant's socket IDs (bypass rooms for reliability)
-    for (const participantUserId of participantIds) {
-      const socketIds = userSockets.get(participantUserId);
-
+    for (const userId of participantIds) {
+      const socketIds = userSockets.get(userId);
       if (socketIds && socketIds.size > 0) {
-        console.log(`[Socket] User ${participantUserId} has ${socketIds.size} active sockets`);
-
-        // Emit directly to each socket ID
         for (const socketId of socketIds) {
-          const socket = io.sockets.sockets.get(socketId);
+          const socket = io?.sockets.sockets.get(socketId);
           if (socket) {
             socket.emit(event as any, data as any);
             totalSocketsEmitted++;
-            console.log(`[Socket] Emitted ${String(event)} directly to socket ${socketId} for user ${participantUserId}`);
           } else {
-            console.log(`[Socket] Socket ${socketId} not found, removing from tracking`);
             socketIds.delete(socketId);
+            socketToUser.delete(socketId);
           }
         }
-      } else {
-        console.log(`[Socket] User ${participantUserId} has no active sockets`);
       }
     }
 
-    console.log(`[Socket] Completed broadcasting ${String(event)} to ${totalSocketsEmitted} sockets for ${participantIds.length} participants`);
+    console.log(`[Socket] Emitted ${String(event)} to ${totalSocketsEmitted} sockets for ${participantIds.length} participants`);
   } catch (error) {
     console.error(`[Socket] Error broadcasting to conversation participants:`, error);
   }
@@ -564,60 +644,51 @@ export function broadcastToOrg(
 
 /**
  * Broadcast to a specific user (all their connected devices)
- * Uses direct socket emission for reliability
  */
 export function broadcastToUser(
   userId: string,
   event: keyof ServerToClientEvents,
   data: unknown
 ): void {
-  if (!io) {
-    console.error(`[Socket] Cannot broadcast to user ${userId}: io is null`);
-    return;
-  }
-
-  const socketIds = userSockets.get(userId);
-  if (socketIds && socketIds.size > 0) {
-    console.log(`[Socket] Broadcasting ${String(event)} to user ${userId} (${socketIds.size} sockets)`);
-    for (const socketId of socketIds) {
-      const socket = io.sockets.sockets.get(socketId);
-      if (socket) {
-        socket.emit(event as any, data as any);
-      } else {
-        socketIds.delete(socketId);
-      }
-    }
-  } else {
-    console.log(`[Socket] User ${userId} has no active sockets for ${String(event)}`);
-  }
+  emitToUser(userId, event, data);
 }
 
 /**
  * Broadcast to multiple users
- * Uses direct socket emission for reliability
  */
 export function broadcastToUsers(
   userIds: string[],
   event: keyof ServerToClientEvents,
   data: unknown
 ): void {
-  if (!io) {
-    console.error(`[Socket] Cannot broadcast to users: io is null`);
-    return;
-  }
-
   for (const userId of userIds) {
-    const socketIds = userSockets.get(userId);
-    if (socketIds && socketIds.size > 0) {
-      for (const socketId of socketIds) {
-        const socket = io.sockets.sockets.get(socketId);
-        if (socket) {
-          socket.emit(event as any, data as any);
-        } else {
-          socketIds.delete(socketId);
-        }
-      }
-    }
+    emitToUser(userId, event, data);
   }
   console.log(`[Socket] Broadcasted ${String(event)} to ${userIds.length} users`);
+}
+
+/**
+ * Get connected user count
+ */
+export function getConnectedUserCount(): number {
+  return userSockets.size;
+}
+
+/**
+ * Get total socket count
+ */
+export function getTotalSocketCount(): number {
+  let count = 0;
+  for (const sockets of userSockets.values()) {
+    count += sockets.size;
+  }
+  return count;
+}
+
+/**
+ * Check if a user is connected
+ */
+export function isUserConnected(userId: string): boolean {
+  const sockets = userSockets.get(userId);
+  return sockets !== undefined && sockets.size > 0;
 }
