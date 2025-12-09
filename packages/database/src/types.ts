@@ -50,7 +50,8 @@ export type {
   UserRolePermission,
 } from '@prisma/client';
 
-export type {
+// Export enums as values (not type-only) so they can be used at runtime (e.g., with z.nativeEnum())
+export {
   ComplianceMode,
   MfaMethod,
   UserStatus,
