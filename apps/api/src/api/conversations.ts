@@ -521,8 +521,8 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
 
     // Broadcast message to all conversation participants via Socket.IO for real-time delivery
     console.log(`[Conversations API] Broadcasting new message ${message.id} in conversation ${req.params.id}`);
-    await broadcastToConversationParticipants(req.params.id, SocketEvents.MESSAGE_RECEIVED, message);
-    broadcastToConversation(req.params.id, SocketEvents.MESSAGE_RECEIVED, message);
+    await broadcastToConversationParticipants(req.params.id!, SocketEvents.MESSAGE_RECEIVED, message);
+    broadcastToConversation(req.params.id!, SocketEvents.MESSAGE_RECEIVED, message);
     console.log(`[Conversations API] Broadcast complete for message ${message.id}`);
 
     res.status(201).json({
