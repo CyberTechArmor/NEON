@@ -148,7 +148,8 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         const senderName = message.sender?.displayName || message.sender?.name || 'Someone';
         const messageContent = message.content || '[Attachment]';
 
-        // Show in-app toast if not in the current conversation
+        // Show in-app toast and browser notification ONLY if not in the current conversation
+        // (user is not actively viewing this chat)
         if (!isCurrentConversation) {
           const messagePreview = messageContent.substring(0, 50);
           toast(
@@ -159,10 +160,11 @@ export const useSocketStore = create<SocketState>((set, get) => ({
               position: 'top-right',
             }
           );
-        }
 
-        // Show sound + browser notification (handled by notification store settings)
-        showMessageNotification(senderName, messageContent, message.conversationId);
+          // Show sound + browser notification (handled by notification store settings)
+          // Only show when user is NOT active on this chat
+          showMessageNotification(senderName, messageContent, message.conversationId);
+        }
       }
 
       // Update activity timestamp

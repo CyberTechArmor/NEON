@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -21,6 +21,15 @@ import {
   MessageSquare,
   Users,
 } from 'lucide-react';
+
+// Common emoji categories for the picker
+const EMOJI_CATEGORIES = {
+  'Smileys': ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙', '🥲', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '😮‍💨', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷'],
+  'Gestures': ['👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '💪', '🦾'],
+  'Hearts': ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '♥️'],
+  'Objects': ['💼', '📁', '📂', '📅', '📆', '📍', '📎', '📏', '📐', '✂️', '🔒', '🔓', '🔑', '🔨', '🪓', '⛏️', '🔧', '🔩', '⚙️', '💡', '🔦', '🕯️', '📱', '💻', '🖥️', '🖨️', '⌨️', '🖱️'],
+  'Symbols': ['✅', '❌', '❓', '❗', '💯', '🔥', '✨', '⭐', '🌟', '💫', '⚡', '🎯', '🚀', '🎉', '🎊', '🏆', '🥇', '🥈', '🥉', '🏅', '🎖️', '📌', '🔔', '🔕'],
+};
 import { formatDistanceToNow } from 'date-fns';
 import { useChatStore } from '../stores/chat';
 import { useSocketStore } from '../stores/socket';
@@ -344,26 +353,26 @@ function ConversationItem({
     return content;
   };
 
-  // Determine message status indicator color
-  const getMessageIndicatorColor = () => {
-    if (!conversation.lastMessage) return null;
+  // Determine message status indicator color and if message is read
+  const getMessageStatus = () => {
+    if (!conversation.lastMessage) return { color: null, isRead: false };
 
     // If there are unread messages, show blue
-    if (conversation.unreadCount > 0) return 'bg-neon-info';
+    if (conversation.unreadCount > 0) return { color: 'bg-neon-info', isRead: false };
 
     // If the last message was sent by current user
     if (conversation.lastMessage.senderId === user?.id) {
       // Check if the other user is online/active - show green for delivered
-      if (isOtherUserActive) return 'bg-neon-success';
+      if (isOtherUserActive) return { color: 'bg-neon-success', isRead: false };
       // Show gray for sent but recipient offline
-      return 'bg-neon-text-muted';
+      return { color: 'bg-neon-text-muted', isRead: false };
     }
 
-    // Last message was received and read
-    return 'bg-neon-success';
+    // Last message was received and read (unreadCount is 0)
+    return { color: 'bg-neon-text-muted', isRead: true };
   };
 
-  const indicatorColor = getMessageIndicatorColor();
+  const { color: indicatorColor, isRead: isLastMessageRead } = getMessageStatus();
 
   return (
     <button
@@ -415,7 +424,9 @@ function ConversationItem({
           <span className={`text-sm truncate flex-1 ${
             conversation.unreadCount > 0
               ? 'font-semibold text-white'
-              : 'text-neon-text-secondary'
+              : isLastMessageRead
+                ? 'text-neon-text-muted italic'
+                : 'text-neon-text-secondary'
           }`}>
             {getLastMessagePreview()}
           </span>
@@ -578,6 +589,32 @@ export default function ChatPage() {
   const [editingMessage, setEditingMessage] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewChat, setShowNewChat] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [emojiCategory, setEmojiCategory] = useState<keyof typeof EMOJI_CATEGORIES>('Smileys');
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    };
+
+    if (showEmojiPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showEmojiPicker]);
+
+  // Handle emoji selection
+  const handleEmojiSelect = useCallback((emoji: string) => {
+    setMessageInput((prev) => prev + emoji);
+    inputRef.current?.focus();
+  }, []);
 
   // Fetch conversations
   const { isLoading: isLoadingConversations } = useQuery({
@@ -828,37 +865,44 @@ export default function ChatPage() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col">
               {isLoadingMessages ? (
-                <div className="flex items-center justify-center py-8">
+                <div className="flex items-center justify-center py-8 flex-1">
                   <Loader2 className="w-6 h-6 animate-spin text-neon-text-muted" />
                 </div>
               ) : currentMessages.length === 0 ? (
-                <div className="text-center py-8 text-neon-text-muted">
+                <div className="text-center py-8 text-neon-text-muted flex-1 flex flex-col items-center justify-center">
                   <p>No messages yet</p>
                   <p className="text-sm">Send a message to start the conversation</p>
                 </div>
               ) : (
-                currentMessages.map((message) => (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    isOwn={message.senderId === user?.id}
-                    onReply={() => setReplyTo(message)}
-                    onEdit={() => {
-                      setEditingMessage(message);
-                      setMessageInput(message.content);
-                    }}
-                    onDelete={() => {
-                      // TODO: Implement delete
-                    }}
-                  />
-                ))
+                <>
+                  {/* Spacer to push messages to bottom when few messages */}
+                  <div className="flex-1 min-h-0" />
+                  {/* Messages container */}
+                  <div className="space-y-4">
+                    {currentMessages.map((message) => (
+                      <MessageBubble
+                        key={message.id}
+                        message={message}
+                        isOwn={message.senderId === user?.id}
+                        onReply={() => setReplyTo(message)}
+                        onEdit={() => {
+                          setEditingMessage(message);
+                          setMessageInput(message.content);
+                        }}
+                        onDelete={() => {
+                          // TODO: Implement delete
+                        }}
+                      />
+                    ))}
+                  </div>
+                </>
               )}
 
               {/* Typing indicator */}
               {currentTypingUsers.length > 0 && (
-                <div className="flex items-center gap-2 text-sm text-neon-text-muted">
+                <div className="flex items-center gap-2 text-sm text-neon-text-muted mt-4">
                   <div className="typing-indicator">
                     <span />
                     <span />
@@ -925,9 +969,57 @@ export default function ChatPage() {
                     className="input py-3 pr-12 resize-none min-h-[48px] max-h-[200px]"
                     rows={1}
                   />
-                  <button className="absolute right-3 bottom-3 text-neon-text-muted hover:text-white">
+                  <button
+                    className={`absolute right-3 bottom-3 transition-colors ${
+                      showEmojiPicker ? 'text-neon-accent' : 'text-neon-text-muted hover:text-white'
+                    }`}
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    type="button"
+                  >
                     <Smile className="w-5 h-5" />
                   </button>
+
+                  {/* Emoji Picker */}
+                  {showEmojiPicker && (
+                    <div
+                      ref={emojiPickerRef}
+                      className="absolute bottom-full right-0 mb-2 bg-neon-surface border border-neon-border rounded-lg shadow-xl z-50 w-[320px]"
+                    >
+                      {/* Category tabs */}
+                      <div className="flex border-b border-neon-border p-1 gap-1 overflow-x-auto">
+                        {Object.keys(EMOJI_CATEGORIES).map((category) => (
+                          <button
+                            key={category}
+                            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors whitespace-nowrap ${
+                              emojiCategory === category
+                                ? 'bg-neon-accent text-white'
+                                : 'text-neon-text-muted hover:text-white hover:bg-neon-surface-hover'
+                            }`}
+                            onClick={() => setEmojiCategory(category as keyof typeof EMOJI_CATEGORIES)}
+                          >
+                            {category}
+                          </button>
+                        ))}
+                      </div>
+                      {/* Emoji grid */}
+                      <div className="p-2 max-h-[200px] overflow-y-auto">
+                        <div className="grid grid-cols-8 gap-1">
+                          {EMOJI_CATEGORIES[emojiCategory].map((emoji, index) => (
+                            <button
+                              key={`${emoji}-${index}`}
+                              className="w-8 h-8 flex items-center justify-center text-lg hover:bg-neon-surface-hover rounded transition-colors"
+                              onClick={() => {
+                                handleEmojiSelect(emoji);
+                                setShowEmojiPicker(false);
+                              }}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <button
