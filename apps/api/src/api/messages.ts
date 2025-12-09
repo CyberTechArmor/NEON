@@ -162,10 +162,8 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 
     // Broadcast message to all conversation participants using direct socket IDs
     // This is more reliable than room-based broadcasting and ensures real-time delivery
+    // NOTE: Only use one broadcast method to prevent duplicate notifications
     await broadcastToConversationParticipants(conversationId, SocketEvents.MESSAGE_RECEIVED, message);
-
-    // Also broadcast to conversation room as a fallback (for users actively viewing)
-    broadcastToConversation(conversationId, SocketEvents.MESSAGE_RECEIVED, message);
 
     console.log(`[Messages API] Broadcast complete for message ${message.id}`);
 
@@ -216,8 +214,8 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
     };
 
     // Use direct socket broadcast for reliable real-time updates
+    // NOTE: Only use one broadcast method to prevent duplicate notifications
     await broadcastToConversationParticipants(message.conversationId, SocketEvents.MESSAGE_EDITED, editPayload);
-    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_EDITED, editPayload);
 
     await AuditService.log({
       action: 'message.edited',
@@ -273,8 +271,8 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
     };
 
     // Use direct socket broadcast for reliable real-time updates
+    // NOTE: Only use one broadcast method to prevent duplicate notifications
     await broadcastToConversationParticipants(message.conversationId, SocketEvents.MESSAGE_DELETED, deletePayload);
-    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_DELETED, deletePayload);
 
     await AuditService.log({
       action: 'message.deleted',
@@ -340,8 +338,8 @@ router.post('/:id/reactions', async (req: Request, res: Response, next: NextFunc
     };
 
     // Use direct socket broadcast for reliable real-time updates
+    // NOTE: Only use one broadcast method to prevent duplicate notifications
     await broadcastToConversationParticipants(message.conversationId, SocketEvents.MESSAGE_REACTION_ADDED, reactionPayload);
-    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_REACTION_ADDED, reactionPayload);
 
     res.json({
       success: true,
@@ -385,8 +383,8 @@ router.delete('/:id/reactions/:emoji', async (req: Request, res: Response, next:
     };
 
     // Use direct socket broadcast for reliable real-time updates
+    // NOTE: Only use one broadcast method to prevent duplicate notifications
     await broadcastToConversationParticipants(message.conversationId, SocketEvents.MESSAGE_REACTION_REMOVED, removeReactionPayload);
-    broadcastToConversation(message.conversationId, SocketEvents.MESSAGE_REACTION_REMOVED, removeReactionPayload);
 
     res.json({
       success: true,
