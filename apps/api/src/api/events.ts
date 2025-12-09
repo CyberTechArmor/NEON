@@ -82,8 +82,759 @@ const customEventSchema = z.object({
 });
 
 // =============================================================================
+// API Documentation
+// =============================================================================
+
+const apiDocumentation = {
+  openapi: '3.0.3',
+  info: {
+    title: 'NEON Events API',
+    version: '1.0.0',
+    description: `
+Real-time event publishing API for NEON. This API enables external systems
+to trigger real-time events, send notifications, and broadcast messages to
+connected clients via WebSocket.
+
+## Authentication
+
+All endpoints (except /docs and /status) require authentication via one of:
+- **API Key**: Pass in header \`X-API-Key: your_api_key\`
+- **JWT Token**: Pass in header \`Authorization: Bearer your_token\`
+
+## Rate Limiting
+
+API keys have configurable rate limits. Default: 100 requests/minute.
+
+## Event Types
+
+The following built-in event types are supported:
+- \`message:received\` - New message in conversation
+- \`message:edited\` - Message was edited
+- \`message:deleted\` - Message was deleted
+- \`notification\` - User notification
+- \`conversation:created\` - New conversation
+- \`conversation:updated\` - Conversation updated
+
+Custom event types can be published using the /publish endpoint.
+    `.trim(),
+    contact: {
+      name: 'NEON Support',
+    },
+  },
+  servers: [
+    {
+      url: '/api/events',
+      description: 'Events API',
+    },
+  ],
+  security: [
+    { ApiKeyAuth: [] },
+    { BearerAuth: [] },
+  ],
+  components: {
+    securitySchemes: {
+      ApiKeyAuth: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'X-API-Key',
+        description: 'API key for external integrations',
+      },
+      BearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'JWT access token',
+      },
+    },
+    schemas: {
+      Error: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', example: false },
+          error: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', example: 'BAD_REQUEST' },
+              message: { type: 'string', example: 'Invalid request' },
+            },
+          },
+          meta: {
+            type: 'object',
+            properties: {
+              requestId: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+            },
+          },
+        },
+      },
+      NotificationPayload: {
+        type: 'object',
+        required: ['userId', 'notification'],
+        properties: {
+          userId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Target user ID',
+          },
+          notification: {
+            type: 'object',
+            required: ['type', 'title'],
+            properties: {
+              type: {
+                type: 'string',
+                description: 'Notification type (e.g., "alert", "info", "warning")',
+                example: 'alert',
+              },
+              title: {
+                type: 'string',
+                description: 'Notification title',
+                example: 'New Message',
+              },
+              body: {
+                type: 'string',
+                description: 'Notification body text',
+                example: 'You have a new message from John',
+              },
+              data: {
+                type: 'object',
+                description: 'Additional data payload',
+                additionalProperties: true,
+              },
+            },
+          },
+        },
+      },
+      BroadcastPayload: {
+        type: 'object',
+        required: ['target', 'event', 'data'],
+        properties: {
+          target: {
+            oneOf: [
+              {
+                type: 'object',
+                required: ['type', 'userId'],
+                properties: {
+                  type: { type: 'string', enum: ['user'] },
+                  userId: { type: 'string', format: 'uuid' },
+                },
+              },
+              {
+                type: 'object',
+                required: ['type', 'userIds'],
+                properties: {
+                  type: { type: 'string', enum: ['users'] },
+                  userIds: {
+                    type: 'array',
+                    items: { type: 'string', format: 'uuid' },
+                  },
+                },
+              },
+              {
+                type: 'object',
+                required: ['type', 'orgId'],
+                properties: {
+                  type: { type: 'string', enum: ['org'] },
+                  orgId: { type: 'string', format: 'uuid' },
+                },
+              },
+            ],
+          },
+          event: {
+            type: 'string',
+            description: 'Event name to broadcast',
+            example: 'custom:update',
+          },
+          data: {
+            type: 'object',
+            description: 'Event payload data',
+            additionalProperties: true,
+          },
+        },
+      },
+      PublishPayload: {
+        type: 'object',
+        required: ['event', 'payload'],
+        properties: {
+          event: {
+            type: 'string',
+            description: 'Event name',
+            example: 'custom:workflow:started',
+          },
+          payload: {
+            type: 'object',
+            description: 'Event payload',
+            additionalProperties: true,
+          },
+          options: {
+            type: 'object',
+            properties: {
+              correlationId: {
+                type: 'string',
+                description: 'Correlation ID for tracking',
+              },
+              source: {
+                type: 'string',
+                description: 'Event source identifier',
+              },
+            },
+          },
+        },
+      },
+      WebhookPayload: {
+        type: 'object',
+        required: ['type', 'data'],
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['message', 'notification', 'alert', 'custom'],
+            description: 'Webhook type',
+          },
+          data: {
+            type: 'object',
+            description: 'Webhook data (varies by type)',
+            additionalProperties: true,
+          },
+        },
+      },
+    },
+  },
+  paths: {
+    '/docs': {
+      get: {
+        summary: 'Get API Documentation',
+        description: 'Returns OpenAPI 3.0 specification for the Events API',
+        tags: ['Documentation'],
+        security: [],
+        responses: {
+          '200': {
+            description: 'API documentation',
+            content: {
+              'application/json': {
+                schema: { type: 'object' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/status': {
+      get: {
+        summary: 'Get System Status',
+        description: 'Returns EventBus and WebSocket connection status',
+        tags: ['Health'],
+        security: [],
+        responses: {
+          '200': {
+            description: 'System status',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean' },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        eventBus: {
+                          type: 'object',
+                          properties: {
+                            adapter: { type: 'string', example: 'inmemory' },
+                            healthy: { type: 'boolean' },
+                          },
+                        },
+                        websocket: {
+                          type: 'object',
+                          properties: {
+                            connectedUsers: { type: 'integer' },
+                            totalSockets: { type: 'integer' },
+                          },
+                        },
+                        timestamp: { type: 'string', format: 'date-time' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/notification': {
+      post: {
+        summary: 'Send Notification',
+        description: 'Send a real-time notification to a specific user. The notification is persisted to the database and delivered via WebSocket.',
+        tags: ['Notifications'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/NotificationPayload' },
+              examples: {
+                basic: {
+                  summary: 'Basic notification',
+                  value: {
+                    userId: '123e4567-e89b-12d3-a456-426614174000',
+                    notification: {
+                      type: 'info',
+                      title: 'Update Available',
+                      body: 'A new version is available',
+                    },
+                  },
+                },
+                withData: {
+                  summary: 'Notification with data',
+                  value: {
+                    userId: '123e4567-e89b-12d3-a456-426614174000',
+                    notification: {
+                      type: 'alert',
+                      title: 'Action Required',
+                      body: 'Please review the pending request',
+                      data: {
+                        action: 'review',
+                        resourceId: 'req-456',
+                        url: '/requests/req-456',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Notification sent successfully',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        notificationId: { type: 'string', format: 'uuid' },
+                        delivered: { type: 'boolean' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '403': {
+            description: 'Forbidden - API key does not have access to user',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '404': {
+            description: 'User not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/broadcast': {
+      post: {
+        summary: 'Broadcast Event',
+        description: 'Broadcast a custom event to a user, multiple users, or an entire organization.',
+        tags: ['Broadcasting'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/BroadcastPayload' },
+              examples: {
+                singleUser: {
+                  summary: 'Broadcast to single user',
+                  value: {
+                    target: {
+                      type: 'user',
+                      userId: '123e4567-e89b-12d3-a456-426614174000',
+                    },
+                    event: 'custom:refresh',
+                    data: { resource: 'dashboard' },
+                  },
+                },
+                multipleUsers: {
+                  summary: 'Broadcast to multiple users',
+                  value: {
+                    target: {
+                      type: 'users',
+                      userIds: [
+                        '123e4567-e89b-12d3-a456-426614174000',
+                        '123e4567-e89b-12d3-a456-426614174001',
+                      ],
+                    },
+                    event: 'team:update',
+                    data: { message: 'Team settings updated' },
+                  },
+                },
+                organization: {
+                  summary: 'Broadcast to organization',
+                  value: {
+                    target: {
+                      type: 'org',
+                      orgId: '123e4567-e89b-12d3-a456-426614174000',
+                    },
+                    event: 'announcement',
+                    data: {
+                      title: 'System Maintenance',
+                      message: 'Scheduled maintenance in 1 hour',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Event broadcast successfully',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        broadcast: { type: 'boolean' },
+                        event: { type: 'string' },
+                        targetType: { type: 'string' },
+                        recipientCount: { type: 'integer' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '403': {
+            description: 'Forbidden - API key does not have access',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/publish': {
+      post: {
+        summary: 'Publish Custom Event',
+        description: 'Publish a custom event to the EventBus. This is the most flexible endpoint for triggering custom workflows and integrations.',
+        tags: ['Events'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PublishPayload' },
+              examples: {
+                basic: {
+                  summary: 'Basic event',
+                  value: {
+                    event: 'workflow:started',
+                    payload: {
+                      workflowId: 'wf-123',
+                      triggeredBy: 'api',
+                    },
+                  },
+                },
+                withOptions: {
+                  summary: 'Event with tracking options',
+                  value: {
+                    event: 'order:created',
+                    payload: {
+                      orderId: 'ord-456',
+                      total: 99.99,
+                    },
+                    options: {
+                      correlationId: 'req-789',
+                      source: 'ecommerce-webhook',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Event published successfully',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        published: { type: 'boolean' },
+                        event: { type: 'string' },
+                        source: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/webhook': {
+      post: {
+        summary: 'Generic Webhook',
+        description: `
+Generic webhook endpoint for external services. Supports multiple webhook types:
+- **message**: Inject a message event
+- **notification**: Send a notification to a user
+- **alert**: Broadcast an alert to users or organization
+- **custom**: Publish a custom event
+        `.trim(),
+        tags: ['Webhooks'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/WebhookPayload' },
+              examples: {
+                notification: {
+                  summary: 'Send notification webhook',
+                  value: {
+                    type: 'notification',
+                    data: {
+                      userId: '123e4567-e89b-12d3-a456-426614174000',
+                      title: 'External Alert',
+                      body: 'Alert from external system',
+                      type: 'external',
+                      metadata: { source: 'monitoring' },
+                    },
+                  },
+                },
+                alert: {
+                  summary: 'Broadcast alert webhook',
+                  value: {
+                    type: 'alert',
+                    data: {
+                      orgId: '123e4567-e89b-12d3-a456-426614174000',
+                      title: 'System Alert',
+                      severity: 'warning',
+                      message: 'High CPU usage detected',
+                    },
+                  },
+                },
+                custom: {
+                  summary: 'Custom event webhook',
+                  value: {
+                    type: 'custom',
+                    data: {
+                      event: 'integration:sync:completed',
+                      payload: {
+                        integrationId: 'int-123',
+                        recordsProcessed: 150,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Webhook processed successfully',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        received: { type: 'boolean' },
+                        type: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Bad request - Invalid webhook type or missing fields',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/message': {
+      post: {
+        summary: 'Publish Message Event',
+        description: 'Publish a message event to a conversation. Requires JWT authentication and the user must be a participant in the conversation.',
+        tags: ['Messages'],
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['conversationId', 'event', 'data'],
+                properties: {
+                  conversationId: { type: 'string', format: 'uuid' },
+                  event: {
+                    type: 'string',
+                    enum: ['message:received', 'message:edited', 'message:deleted'],
+                  },
+                  data: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string', format: 'uuid' },
+                      messageId: { type: 'string', format: 'uuid' },
+                      content: { type: 'string' },
+                      senderId: { type: 'string', format: 'uuid' },
+                      editedAt: { type: 'string', format: 'date-time' },
+                      deletedBy: { type: 'string', format: 'uuid' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Message event published',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        published: { type: 'boolean' },
+                        event: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '403': {
+            description: 'Not a participant in conversation',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  tags: [
+    {
+      name: 'Documentation',
+      description: 'API documentation endpoints',
+    },
+    {
+      name: 'Health',
+      description: 'System health and status',
+    },
+    {
+      name: 'Notifications',
+      description: 'Send real-time notifications to users',
+    },
+    {
+      name: 'Broadcasting',
+      description: 'Broadcast events to users or organizations',
+    },
+    {
+      name: 'Events',
+      description: 'Publish custom events to the EventBus',
+    },
+    {
+      name: 'Webhooks',
+      description: 'Generic webhook endpoints for external integrations',
+    },
+    {
+      name: 'Messages',
+      description: 'Message-related events (requires JWT)',
+    },
+  ],
+};
+
+// =============================================================================
 // Routes
 // =============================================================================
+
+/**
+ * GET /api/events/docs
+ * Get API documentation (OpenAPI 3.0 spec)
+ */
+router.get('/docs', (_req: Request, res: Response) => {
+  res.json(apiDocumentation);
+});
+
+/**
+ * GET /api/events/docs/html
+ * Get API documentation as HTML (Swagger UI redirect)
+ */
+router.get('/docs/html', (_req: Request, res: Response) => {
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEON Events API Documentation</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = () => {
+      SwaggerUIBundle({
+        url: '/api/events/docs',
+        dom_id: '#swagger-ui',
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIBundle.SwaggerUIStandalonePreset
+        ],
+        layout: "BaseLayout",
+        deepLinking: true,
+        showExtensions: true,
+        showCommonExtensions: true
+      });
+    };
+  </script>
+</body>
+</html>
+  `.trim();
+  res.type('html').send(html);
+});
 
 /**
  * GET /api/events/status
