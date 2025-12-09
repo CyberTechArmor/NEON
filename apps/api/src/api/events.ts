@@ -17,7 +17,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { prisma } from '@neon/database';
+import { prisma, NotificationType } from '@neon/database';
 import { publishEvent, eventBus } from '../services/eventbus';
 import { broadcastToUser, broadcastToUsers, broadcastToOrg, sendNotification, getConnectedUserCount, getTotalSocketCount } from '../socket';
 import { SocketEvents } from '@neon/shared';
@@ -46,7 +46,7 @@ const messageEventSchema = z.object({
 const notificationEventSchema = z.object({
   userId: z.string().uuid(),
   notification: z.object({
-    type: z.string(),
+    type: z.nativeEnum(NotificationType),
     title: z.string(),
     body: z.string().optional(),
     data: z.record(z.unknown()).optional(),
@@ -945,7 +945,7 @@ router.post('/notification', authenticateApiKey, async (req: ApiKeyRequest, res:
         type: data.notification.type,
         title: data.notification.title,
         body: data.notification.body,
-        data: data.notification.data,
+        data: data.notification.data as object | undefined,
       },
     });
 
