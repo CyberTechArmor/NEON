@@ -819,6 +819,15 @@ export default function ChatPage() {
     }
   }, [conversationId]);
 
+  // Clear current conversation when leaving the chat page
+  useEffect(() => {
+    return () => {
+      // When component unmounts (user navigates away from chat),
+      // clear the current conversation so notifications work properly
+      setCurrentConversation(null);
+    };
+  }, [setCurrentConversation]);
+
   // Rejoin conversation room when socket reconnects or conversation changes
   useEffect(() => {
     console.log('[ChatPage] Socket/conversation effect:', { isConnected, conversationId });
@@ -927,13 +936,21 @@ export default function ChatPage() {
     navigate('/chat');
   };
 
+  // Handle selecting a conversation (with immediate menu close on mobile)
+  const handleSelectConversation = (selectedConversationId: string) => {
+    // Hide the conversation list immediately on mobile
+    setShowConversationList(false);
+    // Navigate to the selected conversation
+    navigate(`/chat/${selectedConversationId}`);
+  };
+
   return (
     <div className="flex h-full">
       {/* Conversation list - full width on mobile, fixed width on desktop */}
       <div className={`
         ${showConversationList ? 'flex' : 'hidden'}
         lg:flex
-        w-full lg:w-80 flex-shrink-0 border-r border-neon-border flex-col bg-neon-surface/50
+        w-full lg:w-80 flex-shrink-0 border-r border-neon-border flex-col bg-neon-surface/50 h-full overflow-hidden
       `}>
         {/* Header */}
         <div className="flex-shrink-0 p-4 border-b border-neon-border">
@@ -983,7 +1000,7 @@ export default function ChatPage() {
                   key={conversation.id}
                   conversation={conversation}
                   isActive={conversation.id === conversationId}
-                  onClick={() => navigate(`/chat/${conversation.id}`)}
+                  onClick={() => handleSelectConversation(conversation.id)}
                 />
               ))}
             </div>
@@ -997,7 +1014,7 @@ export default function ChatPage() {
         className={`
           ${!showConversationList ? 'flex' : 'hidden'}
           lg:flex
-          flex-1 flex-col min-w-0 relative
+          flex-1 flex-col min-w-0 relative h-full overflow-hidden
         `}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}

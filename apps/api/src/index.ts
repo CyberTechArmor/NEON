@@ -11,6 +11,8 @@ import { createApp } from './app';
 import { createSocketServer } from './socket';
 import { connectRedis, disconnectRedis } from './services/redis';
 import { initializeEventBus, shutdownEventBus } from './services/eventbus';
+import { initializeS3 } from './services/s3';
+import { initializeWebhookDispatch } from './services/webhookDispatch';
 import { startJobScheduler, stopJobScheduler } from './jobs';
 
 const config = getConfig();
@@ -46,6 +48,17 @@ async function main() {
   // Initialize EventBus (for real-time messaging)
   console.log('[EventBus] Initializing...');
   await initializeEventBus();
+
+  // Initialize webhook dispatch service (depends on EventBus)
+  console.log('[Webhook] Initializing dispatch service...');
+  initializeWebhookDispatch();
+
+  // Initialize S3 storage (non-blocking - server starts even if S3 is unavailable)
+  console.log('[S3] Initializing...');
+  const s3Connected = await initializeS3();
+  if (!s3Connected) {
+    console.warn('[Server] Starting with degraded S3 functionality - file uploads may fail');
+  }
 
   // Create Express app
   const app = createApp();

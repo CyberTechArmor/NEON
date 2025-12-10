@@ -37,6 +37,21 @@ router.post(
         throw new Error('No file provided');
       }
 
+      // Check if S3 storage is available
+      if (!S3Service.isS3Available()) {
+        const errorMsg = S3Service.getS3ConnectionError();
+        console.error(`[files] S3 storage is not available: ${errorMsg}`);
+        return res.status(503).json({
+          success: false,
+          error: {
+            code: 'STORAGE_UNAVAILABLE',
+            message: 'File storage is temporarily unavailable. Please try again later.',
+            details: process.env.NODE_ENV === 'development' ? errorMsg : undefined,
+          },
+          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        });
+      }
+
       // Check user storage limit
       const user = await prisma.user.findUnique({
         where: { id: req.userId! },

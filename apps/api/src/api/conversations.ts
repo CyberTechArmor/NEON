@@ -8,6 +8,7 @@ import { createConversationSchema, updateConversationSchema, addParticipantsSche
 import { authenticate } from '../middleware/auth';
 import { canCommunicate, canFreeze } from '../services/permissions';
 import { AuditService } from '../services/audit';
+import { publishEvent } from '../services/eventbus';
 import { broadcastToConversation, broadcastToConversationParticipants } from '../socket';
 import { SocketEvents } from '@neon/shared';
 import { CHAT_LIMITS } from '@neon/shared';
@@ -524,6 +525,19 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
     await broadcastToConversationParticipants(req.params.id!, SocketEvents.MESSAGE_RECEIVED, message);
     broadcastToConversation(req.params.id!, SocketEvents.MESSAGE_RECEIVED, message);
     console.log(`[Conversations API] Broadcast complete for message ${message.id}`);
+
+    // Publish event for webhooks
+    await publishEvent('message:created', {
+      orgId: req.orgId,
+      conversationId: req.params.id,
+      message: {
+        id: message.id,
+        senderId: message.senderId,
+        content: message.content,
+        type: message.type,
+        createdAt: message.createdAt,
+      },
+    });
 
     res.status(201).json({
       success: true,

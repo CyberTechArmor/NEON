@@ -11,6 +11,7 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
+  HeadBucketCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl as awsGetSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -25,6 +26,10 @@ const orgS3Clients = new Map<string, { client: S3Client; publicClient: S3Client;
 // Default clients for environment-based config
 let s3Client: S3Client | null = null;
 let s3PublicClient: S3Client | null = null;
+
+// Connection state
+let isS3Connected = false;
+let lastConnectionError: string | null = null;
 
 // S3 configuration interface for organization storage settings
 export interface S3Config {
@@ -169,7 +174,99 @@ function getPublicClient(): S3Client {
 }
 
 /**
- * Upload a file
+ * Initialize and validate S3 connection at startup
+ * Returns true if connection is successful, throws an error otherwise
+ */
+export async function initializeS3(): Promise<boolean> {
+  console.log('[S3] Initializing S3 storage connection...');
+  console.log(`[S3] Endpoint: ${config.s3.endpoint}`);
+  console.log(`[S3] Region: ${config.s3.region}`);
+  console.log(`[S3] Bucket: ${config.s3.bucketMedia}`);
+  console.log(`[S3] Force Path Style: ${config.s3.forcePathStyle}`);
+
+  try {
+    const client = getClient();
+
+    // Test connection by checking if the media bucket exists
+    await client.send(new HeadBucketCommand({ Bucket: config.s3.bucketMedia }));
+
+    isS3Connected = true;
+    lastConnectionError = null;
+    console.log('[S3] Successfully connected to S3 storage');
+    console.log(`[S3] Media bucket "${config.s3.bucketMedia}" is accessible`);
+
+    return true;
+  } catch (error: any) {
+    isS3Connected = false;
+    lastConnectionError = error.message || 'Unknown S3 connection error';
+
+    // Log detailed error for debugging
+    console.error('[S3] Failed to connect to S3 storage');
+    console.error(`[S3] Error: ${error.name}: ${error.message}`);
+
+    if (error.name === 'NoSuchBucket') {
+      console.error(`[S3] Bucket "${config.s3.bucketMedia}" does not exist. Please create it first.`);
+    } else if (error.name === 'AccessDenied' || error.name === 'InvalidAccessKeyId') {
+      console.error('[S3] Access denied. Check your S3_ACCESS_KEY and S3_SECRET_KEY.');
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      console.error(`[S3] Cannot reach S3 endpoint at ${config.s3.endpoint}. Check S3_ENDPOINT configuration.`);
+    }
+
+    // Don't throw - allow server to start but S3 features will be degraded
+    console.warn('[S3] S3 storage is not available. File uploads will fail until connection is restored.');
+    return false;
+  }
+}
+
+/**
+ * Check if S3 is currently connected
+ */
+export function isS3Available(): boolean {
+  return isS3Connected;
+}
+
+/**
+ * Get the last S3 connection error
+ */
+export function getS3ConnectionError(): string | null {
+  return lastConnectionError;
+}
+
+/**
+ * Retry an S3 operation with exponential backoff
+ */
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelayMs: number = 1000
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+
+      // Don't retry on client errors (4xx)
+      if (error.$metadata?.httpStatusCode >= 400 && error.$metadata?.httpStatusCode < 500) {
+        throw error;
+      }
+
+      // Wait before retrying (exponential backoff)
+      if (attempt < maxRetries - 1) {
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        console.warn(`[S3] Operation failed, retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * Upload a file with retry logic
  */
 export async function uploadFile(
   bucket: string,
@@ -177,40 +274,68 @@ export async function uploadFile(
   body: Buffer | Uint8Array | string,
   contentType?: string
 ): Promise<void> {
+  if (!isS3Connected) {
+    // Try to reconnect
+    await initializeS3();
+    if (!isS3Connected) {
+      throw new Error(`S3 storage is not available: ${lastConnectionError || 'Unknown error'}`);
+    }
+  }
+
   const client = getClient();
 
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-    })
-  );
+  await withRetry(async () => {
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+      })
+    );
+  });
+
+  // Mark as connected after successful operation
+  isS3Connected = true;
+  lastConnectionError = null;
 }
 
 /**
- * Download a file
+ * Download a file with retry logic
  */
 export async function downloadFile(
   bucket: string,
   key: string
 ): Promise<Buffer> {
-  const client = getClient();
-
-  const response = await client.send(
-    new GetObjectCommand({
-      Bucket: bucket,
-      Key: key,
-    })
-  );
-
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
-    chunks.push(chunk);
+  if (!isS3Connected) {
+    // Try to reconnect
+    await initializeS3();
+    if (!isS3Connected) {
+      throw new Error(`S3 storage is not available: ${lastConnectionError || 'Unknown error'}`);
+    }
   }
 
-  return Buffer.concat(chunks);
+  const client = getClient();
+
+  return await withRetry(async () => {
+    const response = await client.send(
+      new GetObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      })
+    );
+
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk);
+    }
+
+    // Mark as connected after successful operation
+    isS3Connected = true;
+    lastConnectionError = null;
+
+    return Buffer.concat(chunks);
+  });
 }
 
 /**

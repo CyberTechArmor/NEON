@@ -15,6 +15,9 @@ const getApiUrl = (): string => {
   return 'http://localhost:3001/api';
 };
 
+// Export API URL for use in components (e.g., API documentation links)
+export const API_BASE_URL = getApiUrl();
+
 export const api = axios.create({
   baseURL: getApiUrl(),
   headers: {
