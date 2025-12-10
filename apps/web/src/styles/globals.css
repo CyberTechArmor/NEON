@@ -299,6 +299,54 @@
   .call-control-danger {
     @apply bg-neon-error text-white hover:bg-red-600;
   }
+
+  /* Custom Toggle Switch */
+  .toggle-switch {
+    @apply relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer
+           transition-colors duration-200 ease-in-out
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30;
+  }
+
+  .toggle-switch-track {
+    @apply absolute inset-0 rounded-full transition-colors duration-200;
+  }
+
+  .toggle-switch-track-off {
+    @apply bg-neon-border;
+  }
+
+  .toggle-switch-track-on {
+    @apply bg-neon-accent;
+  }
+
+  .toggle-switch-thumb {
+    @apply inline-block h-4 w-4 transform rounded-full bg-white shadow-lg
+           transition-transform duration-200 ease-in-out;
+  }
+
+  .toggle-switch-thumb-off {
+    @apply translate-x-1;
+  }
+
+  .toggle-switch-thumb-on {
+    @apply translate-x-6;
+  }
+
+  /* Styled checkbox for better visibility */
+  .checkbox-styled {
+    @apply appearance-none w-5 h-5 rounded border-2 border-neon-border bg-neon-surface
+           cursor-pointer transition-all duration-200
+           checked:bg-neon-accent checked:border-neon-accent
+           hover:border-neon-border-focus
+           focus:outline-none focus:ring-2 focus:ring-neon-accent/30 focus:ring-offset-2 focus:ring-offset-neon-bg;
+  }
+
+  .checkbox-styled:checked {
+    background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='%23161616' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e");
+    background-size: 100% 100%;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
 }
 
 @layer utilities {

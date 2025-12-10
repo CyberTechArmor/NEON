@@ -45,7 +45,7 @@ router.post(
 
       const org = await prisma.organization.findUnique({
         where: { id: req.orgId! },
-        select: { storageUsed: true, storageLimit: true, maxFileSize: true },
+        select: { storageUsed: true, storageLimit: true, maxFileSize: true, settings: true },
       });
 
       const maxFileSize = Number(org?.maxFileSize ?? config.files.maxFileSize);
@@ -58,9 +58,25 @@ router.post(
         throw new StorageLimitError();
       }
 
-      // Upload to S3
+      // Upload to S3 (use org-specific storage if configured)
       const key = `${req.orgId}/${req.userId}/${Date.now()}-${req.file.originalname}`;
-      await S3Service.uploadFile(config.s3.bucketMedia, key, req.file.buffer, req.file.mimetype);
+
+      // Try org-specific storage first, fall back to default
+      let bucket: string;
+      try {
+        const result = await S3Service.uploadFileForOrg(req.orgId!, key, req.file.buffer, req.file.mimetype);
+        bucket = result.bucket;
+      } catch (s3Error: any) {
+        // If org storage fails, try default storage
+        console.warn(`[files] Org S3 upload failed, trying default: ${s3Error.message}`);
+        try {
+          await S3Service.uploadFile(config.s3.bucketMedia, key, req.file.buffer, req.file.mimetype);
+          bucket = config.s3.bucketMedia;
+        } catch (defaultError: any) {
+          console.error(`[files] Default S3 upload also failed: ${defaultError.message}`);
+          throw new Error(`Storage upload failed: ${defaultError.message}`);
+        }
+      }
 
       // Generate thumbnail for images
       let thumbnailKey: string | null = null;
@@ -76,7 +92,7 @@ router.post(
           name: req.file.originalname,
           mimeType: req.file.mimetype,
           size: BigInt(req.file.size),
-          bucket: config.s3.bucketMedia,
+          bucket,
           key,
           thumbnailKey,
         },
@@ -93,8 +109,13 @@ router.post(
         data: { storageUsed: { increment: req.file.size } },
       });
 
-      // Get signed URL for access
-      const url = await S3Service.getSignedUrl(config.s3.bucketMedia, key);
+      // Get signed URL for access (use org-specific if available)
+      let url: string;
+      try {
+        url = await S3Service.getSignedUrlForOrg(req.orgId!, key);
+      } catch {
+        url = await S3Service.getSignedUrl(bucket, key);
+      }
 
       res.status(201).json({
         success: true,

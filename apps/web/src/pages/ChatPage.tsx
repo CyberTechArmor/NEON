@@ -20,6 +20,7 @@ import {
   Loader2,
   MessageSquare,
   Users,
+  ChevronLeft,
 } from 'lucide-react';
 
 // Common emoji categories for the picker
@@ -565,7 +566,9 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [showConversationList, setShowConversationList] = useState(!conversationId);
 
   const { user } = useAuthStore();
   const {
@@ -670,8 +673,17 @@ export default function ChatPage() {
       // Join new conversation room
       joinConversation(conversationId);
       setCurrentConversation(conversationId);
+      // Hide conversation list on mobile when a conversation is selected
+      setShowConversationList(false);
     }
   }, [conversationId, currentConversationId, joinConversation, leaveConversation, setCurrentConversation]);
+
+  // Show conversation list when no conversation is selected
+  useEffect(() => {
+    if (!conversationId) {
+      setShowConversationList(true);
+    }
+  }, [conversationId]);
 
   // Rejoin conversation room when socket reconnects or conversation changes
   useEffect(() => {
@@ -744,12 +756,22 @@ export default function ChatPage() {
   const currentMessages = messages[conversationId || ''] || [];
   const currentTypingUsers = typingUsers[conversationId || ''] || [];
 
+  // Handle back button on mobile
+  const handleBackToList = () => {
+    setShowConversationList(true);
+    navigate('/chat');
+  };
+
   return (
     <div className="flex h-full">
-      {/* Conversation list */}
-      <div className="w-80 flex-shrink-0 border-r border-neon-border flex flex-col bg-neon-surface/50">
+      {/* Conversation list - full width on mobile, fixed width on desktop */}
+      <div className={`
+        ${showConversationList ? 'flex' : 'hidden'}
+        lg:flex
+        w-full lg:w-80 flex-shrink-0 border-r border-neon-border flex-col bg-neon-surface/50
+      `}>
         {/* Header */}
-        <div className="p-4 border-b border-neon-border">
+        <div className="flex-shrink-0 p-4 border-b border-neon-border">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Messages</h2>
             <button
@@ -804,13 +826,24 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Chat area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Chat area - hidden on mobile when showing conversation list */}
+      <div className={`
+        ${!showConversationList ? 'flex' : 'hidden'}
+        lg:flex
+        flex-1 flex-col min-w-0
+      `}>
         {conversationId && currentConversation ? (
           <>
-            {/* Chat header */}
-            <div className="h-16 px-4 flex items-center justify-between border-b border-neon-border bg-neon-surface/50">
+            {/* Chat header - sticky at top */}
+            <div className="flex-shrink-0 h-16 px-4 flex items-center justify-between border-b border-neon-border bg-neon-surface/50">
               <div className="flex items-center gap-3 min-w-0">
+                {/* Back button - mobile only */}
+                <button
+                  className="lg:hidden btn btn-icon btn-ghost -ml-2"
+                  onClick={handleBackToList}
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
                 <div className="avatar avatar-md">
                   {currentConversation.avatarUrl ? (
                     <img
@@ -852,7 +885,7 @@ export default function ChatPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                <button className="btn btn-icon btn-ghost">
+                <button className="btn btn-icon btn-ghost hidden sm:flex">
                   <Phone className="w-5 h-5" />
                 </button>
                 <button className="btn btn-icon btn-ghost">
@@ -864,8 +897,11 @@ export default function ChatPage() {
               </div>
             </div>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 flex flex-col">
+            {/* Messages - scrollable area */}
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 overflow-y-auto p-4 flex flex-col min-h-0"
+            >
               {isLoadingMessages ? (
                 <div className="flex items-center justify-center py-8 flex-1">
                   <Loader2 className="w-6 h-6 animate-spin text-neon-text-muted" />
@@ -918,9 +954,9 @@ export default function ChatPage() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Reply/Edit indicator */}
+            {/* Reply/Edit indicator - sticky above input */}
             {(replyTo || editingMessage) && (
-              <div className="px-4 py-2 bg-neon-surface border-t border-neon-border flex items-center justify-between">
+              <div className="flex-shrink-0 px-4 py-2 bg-neon-surface border-t border-neon-border flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm">
                   {replyTo ? (
                     <>
@@ -948,8 +984,8 @@ export default function ChatPage() {
               </div>
             )}
 
-            {/* Message input */}
-            <div className="p-4 border-t border-neon-border bg-neon-surface/50">
+            {/* Message input - sticky at bottom */}
+            <div className="flex-shrink-0 p-4 border-t border-neon-border bg-neon-surface/50">
               <div className="flex items-end gap-3">
                 <button className="btn btn-icon btn-ghost mb-1">
                   <Paperclip className="w-5 h-5" />
