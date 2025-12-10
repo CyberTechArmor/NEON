@@ -819,6 +819,15 @@ export default function ChatPage() {
     }
   }, [conversationId]);
 
+  // Clear current conversation when leaving the chat page
+  useEffect(() => {
+    return () => {
+      // When component unmounts (user navigates away from chat),
+      // clear the current conversation so notifications work properly
+      setCurrentConversation(null);
+    };
+  }, [setCurrentConversation]);
+
   // Rejoin conversation room when socket reconnects or conversation changes
   useEffect(() => {
     console.log('[ChatPage] Socket/conversation effect:', { isConnected, conversationId });
@@ -927,6 +936,14 @@ export default function ChatPage() {
     navigate('/chat');
   };
 
+  // Handle selecting a conversation (with immediate menu close on mobile)
+  const handleSelectConversation = (selectedConversationId: string) => {
+    // Hide the conversation list immediately on mobile
+    setShowConversationList(false);
+    // Navigate to the selected conversation
+    navigate(`/chat/${selectedConversationId}`);
+  };
+
   return (
     <div className="flex h-full">
       {/* Conversation list - full width on mobile, fixed width on desktop */}
@@ -983,7 +1000,7 @@ export default function ChatPage() {
                   key={conversation.id}
                   conversation={conversation}
                   isActive={conversation.id === conversationId}
-                  onClick={() => navigate(`/chat/${conversation.id}`)}
+                  onClick={() => handleSelectConversation(conversation.id)}
                 />
               ))}
             </div>

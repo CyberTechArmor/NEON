@@ -141,16 +141,25 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       const currentConversationId = useChatStore.getState().currentConversationId;
       const currentUserId = useAuthStore.getState().user?.id;
       const isOwnMessage = message.senderId === currentUserId;
-      const isCurrentConversation = message.conversationId === currentConversationId;
+
+      // Check both the store state AND the current URL path for extra reliability
+      // This handles cases where the store might not be in sync
+      const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+      const isViewingConversationUrl = currentPath === `/chat/${message.conversationId}`;
+      const isCurrentConversation = message.conversationId === currentConversationId || isViewingConversationUrl;
+
+      // Also check if the user is even on the chat page
+      const isOnChatPage = currentPath.startsWith('/chat');
 
       // Show notifications for messages not sent by current user
       if (!isOwnMessage) {
         const senderName = message.sender?.displayName || message.sender?.name || 'Someone';
         const messageContent = message.content || '[Attachment]';
 
-        // Show in-app toast and browser notification ONLY if not in the current conversation
-        // (user is not actively viewing this chat)
-        if (!isCurrentConversation) {
+        // Show in-app toast and browser notification if:
+        // 1. User is NOT on the chat page at all, OR
+        // 2. User is on the chat page but viewing a different conversation
+        if (!isOnChatPage || !isCurrentConversation) {
           const messagePreview = messageContent.substring(0, 50);
           toast(
             `${senderName}: ${messagePreview}${messageContent.length > 50 ? '...' : ''}`,
