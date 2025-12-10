@@ -20,7 +20,7 @@ import {
   Play,
   BookOpen,
 } from 'lucide-react';
-import { adminApi, getErrorMessage } from '../../lib/api';
+import { adminApi, getErrorMessage, API_BASE_URL } from '../../lib/api';
 
 interface ApiKey {
   id: string;
@@ -130,7 +130,7 @@ export function Developers() {
         </div>
         <div className="flex items-center gap-4">
           <a
-            href="/api/docs"
+            href={`${API_BASE_URL}/docs`}
             target="_blank"
             rel="noopener noreferrer"
             className="btn btn-primary"
@@ -140,7 +140,7 @@ export function Developers() {
             <ExternalLink className="w-4 h-4" />
           </a>
           <span className="text-sm text-neon-text-muted">
-            Base URL: <code className="bg-neon-surface-hover px-2 py-1 rounded">{window.location.origin}/api</code>
+            Base URL: <code className="bg-neon-surface-hover px-2 py-1 rounded">{API_BASE_URL}</code>
           </span>
         </div>
       </div>
