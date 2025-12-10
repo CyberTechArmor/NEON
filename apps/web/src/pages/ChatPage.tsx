@@ -21,6 +21,8 @@ import {
   MessageSquare,
   Users,
   ChevronLeft,
+  Image,
+  FileIcon,
 } from 'lucide-react';
 
 // Common emoji categories for the picker
@@ -35,7 +37,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { useChatStore } from '../stores/chat';
 import { useSocketStore } from '../stores/socket';
 import { useAuthStore } from '../stores/auth';
-import { conversationsApi, messagesApi, usersApi, getErrorMessage } from '../lib/api';
+import { conversationsApi, messagesApi, usersApi, filesApi, getErrorMessage } from '../lib/api';
 
 interface UserForChat {
   id: string;
@@ -595,6 +597,11 @@ export default function ChatPage() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [emojiCategory, setEmojiCategory] = useState<keyof typeof EMOJI_CATEGORIES>('Smileys');
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
 
   // Close emoji picker when clicking outside
   useEffect(() => {
@@ -617,6 +624,133 @@ export default function ChatPage() {
   const handleEmojiSelect = useCallback((emoji: string) => {
     setMessageInput((prev) => prev + emoji);
     inputRef.current?.focus();
+  }, []);
+
+  // File handling functions
+  const addFiles = useCallback((files: File[]) => {
+    const validFiles = files.filter((file) => {
+      // Max 10MB per file
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error(`File "${file.name}" is too large (max 10MB)`);
+        return false;
+      }
+      return true;
+    });
+
+    if (validFiles.length > 0) {
+      setPendingFiles((prev) => [...prev, ...validFiles]);
+    }
+  }, []);
+
+  const removeFile = useCallback((index: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // Handle paste events for images
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            // Create a named file from pasted image
+            const namedFile = new File([file], `pasted-image-${Date.now()}.${file.type.split('/')[1]}`, {
+              type: file.type,
+            });
+            files.push(namedFile);
+          }
+        }
+      }
+
+      if (files.length > 0) {
+        e.preventDefault();
+        addFiles(files);
+      }
+    },
+    [addFiles]
+  );
+
+  // Handle file input change
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files || []);
+      addFiles(files);
+      // Reset input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    },
+    [addFiles]
+  );
+
+  // Drag and drop handlers
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only set dragging to false if we're leaving the drop zone entirely
+    if (!dropZoneRef.current?.contains(e.relatedTarget as Node)) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+
+      const files = Array.from(e.dataTransfer?.files || []);
+      if (files.length > 0) {
+        addFiles(files);
+      }
+    },
+    [addFiles]
+  );
+
+  // Upload files helper
+  const uploadFiles = async (files: File[]): Promise<string[]> => {
+    const uploadedUrls: string[] = [];
+
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const response = await filesApi.upload(formData);
+        if (response.data?.data?.url) {
+          uploadedUrls.push(response.data.data.url);
+        }
+      } catch (error) {
+        console.error(`Failed to upload ${file.name}:`, error);
+        toast.error(`Failed to upload ${file.name}`);
+      }
+    }
+
+    return uploadedUrls;
+  };
+
+  // Get file preview URL
+  const getFilePreview = useCallback((file: File): string | null => {
+    if (file.type.startsWith('image/')) {
+      return URL.createObjectURL(file);
+    }
+    return null;
   }, []);
 
   // Fetch conversations
@@ -715,20 +849,51 @@ export default function ChatPage() {
   // Send message
   const handleSendMessage = async () => {
     const content = messageInput.trim();
-    if (!content || sendMessageMutation.isPending) return;
+    const hasFiles = pendingFiles.length > 0;
+
+    if (!content && !hasFiles) return;
+    if (sendMessageMutation.isPending || isUploadingFiles) return;
 
     if (editingMessage) {
       // Handle edit
       // TODO: Implement edit mutation
       setEditingMessage(null);
     } else {
-      sendMessageMutation.mutate({
-        content,
-        replyToId: replyTo?.id,
-      });
+      let finalContent = content;
+
+      // Upload files first if any
+      if (hasFiles) {
+        setIsUploadingFiles(true);
+        try {
+          const uploadedUrls = await uploadFiles(pendingFiles);
+
+          // Append file URLs to message content
+          if (uploadedUrls.length > 0) {
+            const fileLinks = uploadedUrls
+              .map((url) => `[Attachment](${url})`)
+              .join('\n');
+            finalContent = content
+              ? `${content}\n\n${fileLinks}`
+              : fileLinks;
+          }
+        } catch (error) {
+          toast.error('Failed to upload some files');
+        } finally {
+          setIsUploadingFiles(false);
+          setPendingFiles([]);
+        }
+      }
+
+      if (finalContent) {
+        sendMessageMutation.mutate({
+          content: finalContent,
+          replyToId: replyTo?.id,
+        });
+      }
     }
 
     setMessageInput('');
+    setPendingFiles([]);
     handleStopTyping();
     inputRef.current?.focus();
   };
@@ -827,11 +992,28 @@ export default function ChatPage() {
       </div>
 
       {/* Chat area - hidden on mobile when showing conversation list */}
-      <div className={`
-        ${!showConversationList ? 'flex' : 'hidden'}
-        lg:flex
-        flex-1 flex-col min-w-0
-      `}>
+      <div
+        ref={dropZoneRef}
+        className={`
+          ${!showConversationList ? 'flex' : 'hidden'}
+          lg:flex
+          flex-1 flex-col min-w-0 relative
+        `}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        {/* Drag overlay */}
+        {isDragging && conversationId && (
+          <div className="absolute inset-0 z-50 bg-neon-bg/90 flex items-center justify-center border-2 border-dashed border-neon-accent rounded-lg m-2 pointer-events-none">
+            <div className="text-center">
+              <Image className="w-12 h-12 mx-auto mb-2 text-neon-accent" />
+              <p className="text-lg font-medium">Drop files here</p>
+              <p className="text-sm text-neon-text-muted">Images, videos, documents...</p>
+            </div>
+          </div>
+        )}
         {conversationId && currentConversation ? (
           <>
             {/* Chat header - sticky at top */}
@@ -984,10 +1166,66 @@ export default function ChatPage() {
               </div>
             )}
 
+            {/* Pending files preview */}
+            {pendingFiles.length > 0 && (
+              <div className="flex-shrink-0 px-4 py-2 border-t border-neon-border bg-neon-surface/50">
+                <div className="flex flex-wrap gap-2">
+                  {pendingFiles.map((file, index) => {
+                    const preview = getFilePreview(file);
+                    const isImage = file.type.startsWith('image/');
+                    return (
+                      <div
+                        key={`${file.name}-${index}`}
+                        className="relative group"
+                      >
+                        {isImage && preview ? (
+                          <img
+                            src={preview}
+                            alt={file.name}
+                            className="w-16 h-16 object-cover rounded-lg border border-neon-border"
+                          />
+                        ) : (
+                          <div className="w-16 h-16 flex flex-col items-center justify-center rounded-lg border border-neon-border bg-neon-surface-hover">
+                            <FileIcon className="w-6 h-6 text-neon-text-muted" />
+                            <span className="text-[10px] text-neon-text-muted mt-1 max-w-[60px] truncate px-1">
+                              {file.name.split('.').pop()?.toUpperCase()}
+                            </span>
+                          </div>
+                        )}
+                        <button
+                          onClick={() => removeFile(index)}
+                          className="absolute -top-1 -right-1 w-5 h-5 bg-neon-error rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3 text-white" />
+                        </button>
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[9px] text-white px-1 py-0.5 truncate rounded-b-lg">
+                          {file.name.length > 12 ? `${file.name.slice(0, 10)}...` : file.name}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Message input - sticky at bottom */}
             <div className="flex-shrink-0 p-4 border-t border-neon-border bg-neon-surface/50">
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFileInputChange}
+                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar"
+              />
+
               <div className="flex items-end gap-3">
-                <button className="btn btn-icon btn-ghost mb-1">
+                <button
+                  className="btn btn-icon btn-ghost mb-1"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Attach files"
+                >
                   <Paperclip className="w-5 h-5" />
                 </button>
 
@@ -1001,7 +1239,8 @@ export default function ChatPage() {
                     }}
                     onKeyDown={handleKeyPress}
                     onBlur={handleStopTyping}
-                    placeholder="Type a message..."
+                    onPaste={handlePaste}
+                    placeholder={pendingFiles.length > 0 ? "Add a message or send files..." : "Type a message... (paste images with Ctrl+V)"}
                     className="input py-3 pr-12 resize-none min-h-[48px] max-h-[200px]"
                     rows={1}
                   />
@@ -1060,12 +1299,12 @@ export default function ChatPage() {
 
                 <button
                   className={`btn btn-icon mb-1 ${
-                    messageInput.trim() ? 'btn-primary' : 'btn-ghost'
+                    messageInput.trim() || pendingFiles.length > 0 ? 'btn-primary' : 'btn-ghost'
                   }`}
                   onClick={handleSendMessage}
-                  disabled={!messageInput.trim() || sendMessageMutation.isPending}
+                  disabled={(!messageInput.trim() && pendingFiles.length === 0) || sendMessageMutation.isPending || isUploadingFiles}
                 >
-                  {sendMessageMutation.isPending ? (
+                  {sendMessageMutation.isPending || isUploadingFiles ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : editingMessage ? (
                     <Check className="w-5 h-5" />
