@@ -108,6 +108,29 @@ export default function AppLayout() {
     };
   }, [connect, disconnect, updatePresence]);
 
+  // Listen for service worker messages (notification clicks)
+  useEffect(() => {
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'NOTIFICATION_CLICK') {
+        console.log('[AppLayout] Notification click received:', event.data);
+        // Navigate to the URL from the notification
+        if (event.data.url) {
+          navigate(event.data.url);
+        }
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+    }
+
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+      }
+    };
+  }, [navigate]);
+
   // Calculate connection status for display
   const getConnectionStatus = () => {
     if (!isConnected) return 'disconnected';

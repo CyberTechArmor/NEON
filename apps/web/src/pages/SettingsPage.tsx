@@ -35,6 +35,39 @@ import {
 } from '../stores/notifications';
 import { usersApi, authApi, filesApi, getErrorMessage, api } from '../lib/api';
 
+// Toggle switch component for better visibility
+function Toggle({
+  checked,
+  onChange,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`toggle-switch ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+      <span
+        className={`toggle-switch-track ${
+          checked ? 'toggle-switch-track-on' : 'toggle-switch-track-off'
+        }`}
+      />
+      <span
+        className={`toggle-switch-thumb ${
+          checked ? 'toggle-switch-thumb-on' : 'toggle-switch-thumb-off'
+        }`}
+      />
+    </button>
+  );
+}
+
 // Profile settings
 function ProfileSettings() {
   const { user, setUser } = useAuthStore();
@@ -765,15 +798,13 @@ function NotificationSettings() {
                     <span>Enable Browser Notifications</span>
                   </button>
                 ) : browserPermission === 'granted' ? (
-                  <label className="flex items-center justify-between cursor-pointer">
+                  <div className="flex items-center justify-between">
                     <span className="text-sm">Browser notifications enabled</span>
-                    <input
-                      type="checkbox"
+                    <Toggle
                       checked={browserNotificationsEnabled}
-                      onChange={(e) => setBrowserNotificationsEnabled(e.target.checked)}
-                      className="w-5 h-5 rounded border-neon-border bg-neon-surface"
+                      onChange={setBrowserNotificationsEnabled}
                     />
-                  </label>
+                  </div>
                 ) : (
                   <p className="text-sm text-neon-text-muted">
                     To enable notifications, click the lock icon in your browser's address bar and allow notifications.
@@ -804,11 +835,9 @@ function NotificationSettings() {
                     </p>
                   </div>
                 </div>
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={soundEnabled}
-                  onChange={(e) => setSoundEnabled(e.target.checked)}
-                  className="w-5 h-5 rounded border-neon-border bg-neon-surface"
+                  onChange={setSoundEnabled}
                 />
               </div>
               {soundEnabled && (
@@ -833,11 +862,9 @@ function NotificationSettings() {
                     </p>
                   </div>
                 </div>
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={testAlertSoundEnabled}
-                  onChange={(e) => setTestAlertSoundEnabled(e.target.checked)}
-                  className="w-5 h-5 rounded border-neon-border bg-neon-surface"
+                  onChange={setTestAlertSoundEnabled}
                 />
               </div>
               {testAlertSoundEnabled && (
@@ -916,35 +943,31 @@ function NotificationSettings() {
         <div>
           <h3 className="text-lg font-medium mb-4">Email notifications</h3>
           <div className="space-y-3">
-            <label className="flex items-center justify-between p-3 card cursor-pointer">
+            <div className="flex items-center justify-between p-3 card">
               <div>
                 <p className="font-medium">Direct messages</p>
                 <p className="text-sm text-neon-text-muted">
                   Get email for new direct messages
                 </p>
               </div>
-              <input
-                type="checkbox"
+              <Toggle
                 checked={emailSettings.emailMessages}
                 onChange={() => toggleEmailSetting('emailMessages')}
-                className="w-5 h-5 rounded border-neon-border bg-neon-surface"
               />
-            </label>
+            </div>
 
-            <label className="flex items-center justify-between p-3 card cursor-pointer">
+            <div className="flex items-center justify-between p-3 card">
               <div>
                 <p className="font-medium">Mentions</p>
                 <p className="text-sm text-neon-text-muted">
                   Get email when you're mentioned
                 </p>
               </div>
-              <input
-                type="checkbox"
+              <Toggle
                 checked={emailSettings.emailMentions}
                 onChange={() => toggleEmailSetting('emailMentions')}
-                className="w-5 h-5 rounded border-neon-border bg-neon-surface"
               />
-            </label>
+            </div>
           </div>
         </div>
       </div>
@@ -961,17 +984,17 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div className="h-full flex">
-      {/* Settings sidebar */}
-      <div className="w-64 flex-shrink-0 border-r border-neon-border p-4">
-        <h1 className="text-xl font-semibold mb-6">Settings</h1>
-        <nav className="space-y-1">
+    <div className="h-full flex flex-col lg:flex-row">
+      {/* Settings sidebar - horizontal scroll on mobile, vertical on desktop */}
+      <div className="flex-shrink-0 border-b lg:border-b-0 lg:border-r border-neon-border p-4 lg:w-64">
+        <h1 className="text-xl font-semibold mb-4 lg:mb-6 hidden lg:block">Settings</h1>
+        <nav className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-x-visible scrollbar-hide">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                `sidebar-item ${isActive ? 'sidebar-item-active' : ''}`
+                `sidebar-item whitespace-nowrap ${isActive ? 'sidebar-item-active' : ''}`
               }
             >
               <item.icon className="w-5 h-5" />
@@ -982,7 +1005,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Settings content */}
-      <div className="flex-1 overflow-y-auto p-8">
+      <div className="flex-1 overflow-y-auto p-4 lg:p-8">
         <Routes>
           <Route index element={<ProfileSettings />} />
           <Route path="profile" element={<ProfileSettings />} />

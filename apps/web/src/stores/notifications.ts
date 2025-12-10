@@ -119,11 +119,24 @@ export function playTestAlertSound(volume: number = 0.7): void {
 }
 
 /**
+ * Extended notification options for mobile and service worker support
+ */
+interface ExtendedNotificationOptions extends NotificationOptions {
+  conversationId?: string;
+  vibrate?: number | number[];
+  renotify?: boolean;
+  data?: Record<string, any>;
+  actions?: Array<{ action: string; title: string; icon?: string }>;
+}
+
+/**
  * Show a browser notification with optional navigation on click
+ * Works with both regular Notification API and Service Worker notifications
+ * for better mobile support (shows in notification bar)
  */
 export async function showBrowserNotification(
   title: string,
-  options?: NotificationOptions & { conversationId?: string }
+  options?: ExtendedNotificationOptions
 ): Promise<Notification | null> {
   // Check if notifications are supported
   if (!('Notification' in window)) {
@@ -137,17 +150,40 @@ export async function showBrowserNotification(
     return null;
   }
 
+  const { conversationId, ...notificationOptions } = options || {};
+
+  // Notification options optimized for mobile OS notification bar
+  const fullOptions: ExtendedNotificationOptions = {
+    icon: '/neon-icon.svg',
+    badge: '/neon-icon.svg',
+    vibrate: [200, 100, 200], // Vibration pattern for mobile
+    silent: false, // Allow system sound on mobile
+    requireInteraction: false, // Don't require interaction on mobile
+    data: { conversationId, url: conversationId ? `/chat/${conversationId}` : '/' },
+    ...notificationOptions,
+  };
+
   try {
-    const { conversationId, ...notificationOptions } = options || {};
+    // Try to use Service Worker for better mobile support (shows in notification bar)
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      const registration = await navigator.serviceWorker.ready;
+      if (registration.showNotification) {
+        // Service worker notification - shows in mobile notification bar
+        await registration.showNotification(title, fullOptions as NotificationOptions);
+        return null; // SW notification doesn't return a Notification object
+      }
+    }
 
-    const notification = new Notification(title, {
-      icon: '/neon-icon.svg',
-      badge: '/neon-icon.svg',
-      ...notificationOptions,
-    });
+    // Fall back to regular Notification API
+    const notification = new Notification(title, fullOptions as NotificationOptions);
 
-    // Auto-close after 5 seconds
-    setTimeout(() => notification.close(), 5000);
+    // Auto-close after 5 seconds (desktop only, mobile handles this)
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent
+    );
+    if (!isMobile) {
+      setTimeout(() => notification.close(), 5000);
+    }
 
     // Handle click - navigate to conversation if provided
     notification.onclick = () => {
@@ -180,6 +216,8 @@ export async function showBrowserNotification(
 
 /**
  * Show a notification for a new message
+ * Works in both foreground and background (via service worker)
+ * Shows in mobile notification bar like native OS notifications
  */
 export function showMessageNotification(
   senderName: string,
@@ -195,15 +233,20 @@ export function showMessageNotification(
   }
 
   // Show browser notification if enabled and permitted
+  // This will show in mobile notification bar with vibration
   if (browserNotificationsEnabled && Notification.permission === 'granted') {
-    // Note: 'renotify' is a valid Web Notifications API property but not in TypeScript's
-    // NotificationOptions type. Use type assertion for extended notification options.
     showBrowserNotification(senderName, {
       body: messageContent.substring(0, 100) + (messageContent.length > 100 ? '...' : ''),
       tag: conversationId || 'message', // Group notifications by conversation
-      renotify: true,
+      renotify: true, // Show new notification even if same tag
       conversationId, // Pass conversationId for navigation on click
-    } as NotificationOptions & { conversationId?: string });
+      vibrate: [200, 100, 200], // Vibration for mobile
+      // Actions for notification (shown on mobile when expanded)
+      actions: conversationId ? [
+        { action: 'view', title: 'View', icon: '/icons/view.png' },
+        { action: 'dismiss', title: 'Dismiss', icon: '/icons/dismiss.png' },
+      ] : undefined,
+    });
   }
 }
 

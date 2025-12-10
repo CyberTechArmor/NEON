@@ -12,27 +12,150 @@ import { checkRedisHealth } from '../services/redis';
 import { getJobStatus, triggerJob } from '../jobs';
 import { hashPassword, generateSecureToken } from '../services/auth';
 import { S3Client, HeadBucketCommand, ListObjectsV2Command, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { clearOrgS3Cache } from '../services/s3';
+import { clearOrgS3Cache, getOrgS3Config } from '../services/s3';
+import { getConfig } from '@neon/config';
+
+const config = getConfig();
 
 const router = Router();
 router.use(authenticate);
+
+/**
+ * Check S3 storage health
+ */
+async function checkStorageHealth(orgId: string): Promise<{ healthy: boolean; message: string; provider?: string }> {
+  try {
+    // First try org-specific storage
+    const orgConfig = await getOrgS3Config(orgId);
+
+    if (orgConfig && orgConfig.enabled) {
+      const testClient = new S3Client({
+        endpoint: orgConfig.endpoint,
+        region: orgConfig.region,
+        credentials: {
+          accessKeyId: orgConfig.accessKeyId,
+          secretAccessKey: orgConfig.secretAccessKey,
+        },
+        forcePathStyle: orgConfig.forcePathStyle,
+      });
+
+      try {
+        await testClient.send(new HeadBucketCommand({ Bucket: orgConfig.bucket }));
+        return {
+          healthy: true,
+          message: 'Organization storage connected',
+          provider: orgConfig.provider || 'custom',
+        };
+      } catch (s3Error: any) {
+        return {
+          healthy: false,
+          message: `Organization storage error: ${s3Error.message || 'Connection failed'}`,
+          provider: orgConfig.provider || 'custom',
+        };
+      }
+    }
+
+    // Fall back to default storage config
+    if (config.s3.endpoint && config.s3.accessKey && config.s3.secretKey) {
+      const defaultClient = new S3Client({
+        endpoint: config.s3.endpoint,
+        region: config.s3.region,
+        credentials: {
+          accessKeyId: config.s3.accessKey,
+          secretAccessKey: config.s3.secretKey,
+        },
+        forcePathStyle: config.s3.forcePathStyle,
+      });
+
+      try {
+        await defaultClient.send(new HeadBucketCommand({ Bucket: config.s3.bucketMedia }));
+        return {
+          healthy: true,
+          message: 'Default storage connected',
+          provider: 'default',
+        };
+      } catch (s3Error: any) {
+        return {
+          healthy: false,
+          message: `Default storage error: ${s3Error.message || 'Connection failed'}`,
+          provider: 'default',
+        };
+      }
+    }
+
+    return {
+      healthy: false,
+      message: 'No storage configured',
+    };
+  } catch (error: any) {
+    return {
+      healthy: false,
+      message: `Storage check failed: ${error.message}`,
+    };
+  }
+}
+
+/**
+ * Check LiveKit health (placeholder - implement based on your LiveKit setup)
+ */
+async function checkLiveKitHealth(): Promise<{ healthy: boolean; message: string }> {
+  try {
+    // Check if LiveKit is configured
+    if (!config.livekit?.host || !config.livekit?.apiKey) {
+      return {
+        healthy: false,
+        message: 'LiveKit not configured',
+      };
+    }
+
+    // Simple connectivity check - ping the LiveKit server
+    const response = await fetch(`${config.livekit.host}/health`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => null);
+
+    if (response && response.ok) {
+      return {
+        healthy: true,
+        message: 'LiveKit server connected',
+      };
+    }
+
+    return {
+      healthy: false,
+      message: 'LiveKit server not reachable',
+    };
+  } catch (error: any) {
+    return {
+      healthy: false,
+      message: `LiveKit check failed: ${error.message}`,
+    };
+  }
+}
 
 /**
  * GET /admin/health
  */
 router.get('/health', requirePermission('org:view_settings'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const [dbHealth, redisHealth] = await Promise.all([
+    const [dbHealth, redisHealth, storageHealth, livekitHealth] = await Promise.all([
       checkDatabaseHealth(),
       checkRedisHealth(),
+      checkStorageHealth(req.orgId!),
+      checkLiveKitHealth(),
     ]);
+
+    const allHealthy = dbHealth.healthy && redisHealth.healthy && storageHealth.healthy && livekitHealth.healthy;
+    const coreHealthy = dbHealth.healthy && redisHealth.healthy;
 
     res.json({
       success: true,
       data: {
-        status: dbHealth.healthy && redisHealth.healthy ? 'healthy' : 'degraded',
+        status: allHealthy ? 'healthy' : (coreHealthy ? 'degraded' : 'unhealthy'),
         database: dbHealth,
         redis: redisHealth,
+        storage: storageHealth,
+        livekit: livekitHealth,
         jobs: getJobStatus(),
       },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -1283,18 +1406,26 @@ router.patch('/organization/settings', requirePermission('org:manage_settings'),
 
 /**
  * POST /admin/organization/test-storage
- * Test S3-compatible storage connection
+ * Test S3-compatible storage connection by actually connecting to the service
  */
 router.post('/organization/test-storage', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { endpoint, bucket, region, accessKeyId, secretAccessKey, forcePathStyle } = req.body;
+    const { endpoint, bucket, region, accessKeyId, secretAccessKey, forcePathStyle, provider } = req.body;
 
-    if (!endpoint || !bucket) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'INVALID_CONFIG',
-          message: 'Endpoint and bucket are required',
+    // Validate required fields
+    const missingFields: string[] = [];
+    if (!endpoint) missingFields.push('endpoint');
+    if (!bucket) missingFields.push('bucket');
+    if (!accessKeyId) missingFields.push('accessKeyId');
+    if (!secretAccessKey) missingFields.push('secretAccessKey');
+
+    if (missingFields.length > 0) {
+      return res.json({
+        success: true,
+        data: {
+          success: false,
+          message: `Missing required fields: ${missingFields.join(', ')}`,
+          missingFields,
         },
         meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
       });
@@ -1304,10 +1435,10 @@ router.post('/organization/test-storage', requirePermission('org:manage_settings
     const testClient = new S3Client({
       endpoint,
       region: region || 'us-east-1',
-      credentials: accessKeyId && secretAccessKey ? {
+      credentials: {
         accessKeyId,
         secretAccessKey,
-      } : undefined,
+      },
       forcePathStyle: forcePathStyle !== false,
     });
 
@@ -1322,7 +1453,13 @@ router.post('/organization/test-storage', requirePermission('org:manage_settings
         success: true,
         data: {
           success: true,
-          message: 'Connection successful! Bucket is accessible.'
+          message: 'Connection successful! Bucket is accessible.',
+          config: {
+            provider: provider || 'custom',
+            endpoint,
+            bucket,
+            region: region || 'us-east-1',
+          },
         },
         meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
       });
@@ -1334,7 +1471,11 @@ router.post('/organization/test-storage', requirePermission('org:manage_settings
         success: true,
         data: {
           success: false,
-          message: `Connection failed: ${errorCode} - ${errorMessage}`
+          message: `Connection failed: ${errorCode} - ${errorMessage}`,
+          error: {
+            code: errorCode,
+            message: errorMessage,
+          },
         },
         meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
       });
