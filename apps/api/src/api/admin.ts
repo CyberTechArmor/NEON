@@ -1865,4 +1865,603 @@ router.post('/demo-user/regenerate', requirePermission('org:manage_settings'), a
   }
 });
 
+// ============================================================================
+// Developer Tools Routes (API Keys & Webhooks)
+// ============================================================================
+
+// Available webhook events
+const WEBHOOK_EVENTS = [
+  { id: 'message.created', name: 'Message Created', description: 'When a new message is sent' },
+  { id: 'message.updated', name: 'Message Updated', description: 'When a message is edited' },
+  { id: 'message.deleted', name: 'Message Deleted', description: 'When a message is deleted' },
+  { id: 'user.created', name: 'User Created', description: 'When a new user is created' },
+  { id: 'user.updated', name: 'User Updated', description: 'When a user profile is updated' },
+  { id: 'user.deleted', name: 'User Deleted', description: 'When a user is deactivated' },
+  { id: 'user.online', name: 'User Online', description: 'When a user comes online' },
+  { id: 'user.offline', name: 'User Offline', description: 'When a user goes offline' },
+  { id: 'meeting.scheduled', name: 'Meeting Scheduled', description: 'When a meeting is scheduled' },
+  { id: 'meeting.started', name: 'Meeting Started', description: 'When a meeting starts' },
+  { id: 'meeting.ended', name: 'Meeting Ended', description: 'When a meeting ends' },
+  { id: 'meeting.participant_joined', name: 'Participant Joined', description: 'When someone joins a meeting' },
+  { id: 'meeting.participant_left', name: 'Participant Left', description: 'When someone leaves a meeting' },
+  { id: 'call.started', name: 'Call Started', description: 'When a call is initiated' },
+  { id: 'call.ended', name: 'Call Ended', description: 'When a call ends' },
+  { id: 'conversation.created', name: 'Conversation Created', description: 'When a new conversation is created' },
+  { id: 'file.uploaded', name: 'File Uploaded', description: 'When a file is uploaded' },
+];
+
+// Available API scopes
+const API_SCOPES = [
+  { id: 'read:users', name: 'Read Users', description: 'Read user information' },
+  { id: 'write:users', name: 'Write Users', description: 'Create and update users' },
+  { id: 'read:messages', name: 'Read Messages', description: 'Read messages' },
+  { id: 'write:messages', name: 'Write Messages', description: 'Send messages' },
+  { id: 'read:conversations', name: 'Read Conversations', description: 'Read conversations' },
+  { id: 'write:conversations', name: 'Write Conversations', description: 'Create conversations' },
+  { id: 'read:meetings', name: 'Read Meetings', description: 'Read meeting information' },
+  { id: 'write:meetings', name: 'Write Meetings', description: 'Create and manage meetings' },
+  { id: 'read:files', name: 'Read Files', description: 'Download files' },
+  { id: 'write:files', name: 'Write Files', description: 'Upload files' },
+  { id: 'admin', name: 'Admin Access', description: 'Full administrative access' },
+];
+
+/**
+ * GET /admin/developers/events
+ * List available webhook events
+ */
+router.get('/developers/events', requirePermission('org:manage_settings'), async (req: Request, res: Response) => {
+  res.json({
+    success: true,
+    data: WEBHOOK_EVENTS,
+    meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+  });
+});
+
+/**
+ * GET /admin/developers/scopes
+ * List available API scopes
+ */
+router.get('/developers/scopes', requirePermission('org:manage_settings'), async (req: Request, res: Response) => {
+  res.json({
+    success: true,
+    data: API_SCOPES,
+    meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+  });
+});
+
+// ============================================================================
+// API Key Management
+// ============================================================================
+
+/**
+ * GET /admin/developers/api-keys
+ * List all API keys for the organization
+ */
+router.get('/developers/api-keys', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { page, limit } = paginationSchema.parse(req.query);
+    const skip = (page - 1) * limit;
+
+    const [apiKeys, total] = await Promise.all([
+      prisma.apiKey.findMany({
+        where: { orgId: req.orgId!, revokedAt: null },
+        select: {
+          id: true,
+          name: true,
+          keyPrefix: true,
+          scopes: true,
+          rateLimit: true,
+          createdAt: true,
+          createdBy: true,
+          lastUsedAt: true,
+          expiresAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.apiKey.count({ where: { orgId: req.orgId!, revokedAt: null } }),
+    ]);
+
+    res.json({
+      success: true,
+      data: apiKeys,
+      meta: {
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+          hasNext: skip + apiKeys.length < total,
+          hasPrev: page > 1,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/developers/api-keys
+ * Create a new API key
+ */
+router.post('/developers/api-keys', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { name, scopes, rateLimit, expiresAt } = req.body;
+
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Name is required' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Generate a secure API key
+    const rawKey = `neon_${generateSecureToken(32)}`;
+    const keyPrefix = rawKey.substring(0, 12);
+    const keyHash = await hashPassword(rawKey);
+
+    const apiKey = await prisma.apiKey.create({
+      data: {
+        orgId: req.orgId!,
+        name,
+        keyHash,
+        keyPrefix,
+        scopes: scopes || [],
+        rateLimit: rateLimit || null,
+        createdBy: req.userId!,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+      },
+      select: {
+        id: true,
+        name: true,
+        keyPrefix: true,
+        scopes: true,
+        rateLimit: true,
+        createdAt: true,
+        expiresAt: true,
+      },
+    });
+
+    await AuditService.log({
+      action: 'api_key.created',
+      resourceType: 'api_key',
+      resourceId: apiKey.id,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { name, scopes },
+      ipAddress: req.ip,
+    });
+
+    // Return the raw key only once - it cannot be retrieved again
+    return res.status(201).json({
+      success: true,
+      data: {
+        ...apiKey,
+        key: rawKey, // Only returned on creation
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * DELETE /admin/developers/api-keys/:id
+ * Revoke an API key
+ */
+router.delete('/developers/api-keys/:id', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const apiKey = await prisma.apiKey.findFirst({
+      where: { id: req.params.id, orgId: req.orgId! },
+    });
+
+    if (!apiKey) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'API key not found' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    await prisma.apiKey.update({
+      where: { id: req.params.id },
+      data: {
+        revokedAt: new Date(),
+        revokedBy: req.userId,
+      },
+    });
+
+    await AuditService.log({
+      action: 'api_key.revoked',
+      resourceType: 'api_key',
+      resourceId: req.params.id,
+      actorId: req.userId,
+      orgId: req.orgId,
+      ipAddress: req.ip,
+    });
+
+    return res.json({
+      success: true,
+      data: { message: 'API key revoked' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ============================================================================
+// Webhook Management
+// ============================================================================
+
+/**
+ * GET /admin/developers/webhooks
+ * List all webhooks for the organization
+ */
+router.get('/developers/webhooks', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { page, limit } = paginationSchema.parse(req.query);
+    const skip = (page - 1) * limit;
+
+    const [webhooks, total] = await Promise.all([
+      prisma.webhook.findMany({
+        where: { orgId: req.orgId! },
+        select: {
+          id: true,
+          name: true,
+          url: true,
+          events: true,
+          enabled: true,
+          lastTriggeredAt: true,
+          lastSuccessAt: true,
+          lastFailureAt: true,
+          failureCount: true,
+          successCount: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.webhook.count({ where: { orgId: req.orgId! } }),
+    ]);
+
+    res.json({
+      success: true,
+      data: webhooks,
+      meta: {
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+          hasNext: skip + webhooks.length < total,
+          hasPrev: page > 1,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /admin/developers/webhooks/:id
+ * Get a specific webhook
+ */
+router.get('/developers/webhooks/:id', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const webhook = await prisma.webhook.findFirst({
+      where: { id: req.params.id, orgId: req.orgId! },
+    });
+
+    if (!webhook) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Webhook not found' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: webhook,
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * POST /admin/developers/webhooks
+ * Create a new webhook
+ */
+router.post('/developers/webhooks', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { name, url, events, enabled } = req.body;
+
+    if (!name || !url) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Name and URL are required' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    if (!events || events.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'At least one event must be selected' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Generate a secret for webhook signature verification
+    const secret = generateSecureToken(32);
+
+    const webhook = await prisma.webhook.create({
+      data: {
+        orgId: req.orgId!,
+        name,
+        url,
+        secret,
+        events,
+        enabled: enabled !== false,
+        createdBy: req.userId!,
+      },
+    });
+
+    await AuditService.log({
+      action: 'webhook.created',
+      resourceType: 'webhook',
+      resourceId: webhook.id,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { name, url, events },
+      ipAddress: req.ip,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        ...webhook,
+        secret, // Only returned on creation
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * PATCH /admin/developers/webhooks/:id
+ * Update a webhook
+ */
+router.patch('/developers/webhooks/:id', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { name, url, events, enabled } = req.body;
+
+    const existing = await prisma.webhook.findFirst({
+      where: { id: req.params.id, orgId: req.orgId! },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Webhook not found' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const updateData: any = {};
+    if (name !== undefined) updateData.name = name;
+    if (url !== undefined) updateData.url = url;
+    if (events !== undefined) updateData.events = events;
+    if (enabled !== undefined) updateData.enabled = enabled;
+
+    const webhook = await prisma.webhook.update({
+      where: { id: req.params.id },
+      data: updateData,
+    });
+
+    await AuditService.log({
+      action: 'webhook.updated',
+      resourceType: 'webhook',
+      resourceId: webhook.id,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { fields: Object.keys(updateData) },
+      ipAddress: req.ip,
+    });
+
+    return res.json({
+      success: true,
+      data: webhook,
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * DELETE /admin/developers/webhooks/:id
+ * Delete a webhook
+ */
+router.delete('/developers/webhooks/:id', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const webhook = await prisma.webhook.findFirst({
+      where: { id: req.params.id, orgId: req.orgId! },
+    });
+
+    if (!webhook) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Webhook not found' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    await prisma.webhook.delete({
+      where: { id: req.params.id },
+    });
+
+    await AuditService.log({
+      action: 'webhook.deleted',
+      resourceType: 'webhook',
+      resourceId: req.params.id,
+      actorId: req.userId,
+      orgId: req.orgId,
+      ipAddress: req.ip,
+    });
+
+    return res.json({
+      success: true,
+      data: { message: 'Webhook deleted' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * POST /admin/developers/webhooks/:id/test
+ * Test a webhook by sending a test payload
+ */
+router.post('/developers/webhooks/:id/test', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const webhook = await prisma.webhook.findFirst({
+      where: { id: req.params.id, orgId: req.orgId! },
+    });
+
+    if (!webhook) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Webhook not found' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Create test payload
+    const testPayload = {
+      event: 'test',
+      timestamp: new Date().toISOString(),
+      data: {
+        message: 'This is a test webhook from NEON',
+        webhookId: webhook.id,
+        webhookName: webhook.name,
+      },
+    };
+
+    // Send test request
+    const startTime = Date.now();
+    try {
+      const response = await fetch(webhook.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Secret': webhook.secret,
+          'X-Webhook-Event': 'test',
+        },
+        body: JSON.stringify(testPayload),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      const latency = Date.now() - startTime;
+
+      if (response.ok) {
+        return res.json({
+          success: true,
+          data: {
+            success: true,
+            statusCode: response.status,
+            latency,
+            message: 'Webhook test successful',
+          },
+          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        });
+      } else {
+        return res.json({
+          success: true,
+          data: {
+            success: false,
+            statusCode: response.status,
+            latency,
+            message: `Webhook returned status ${response.status}`,
+          },
+          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        });
+      }
+    } catch (fetchError: any) {
+      const latency = Date.now() - startTime;
+      return res.json({
+        success: true,
+        data: {
+          success: false,
+          latency,
+          message: `Failed to reach webhook: ${fetchError.message}`,
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * POST /admin/developers/webhooks/:id/regenerate-secret
+ * Regenerate webhook secret
+ */
+router.post('/developers/webhooks/:id/regenerate-secret', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const existing = await prisma.webhook.findFirst({
+      where: { id: req.params.id, orgId: req.orgId! },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Webhook not found' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const newSecret = generateSecureToken(32);
+
+    const webhook = await prisma.webhook.update({
+      where: { id: req.params.id },
+      data: { secret: newSecret },
+    });
+
+    await AuditService.log({
+      action: 'webhook.secret_regenerated',
+      resourceType: 'webhook',
+      resourceId: webhook.id,
+      actorId: req.userId,
+      orgId: req.orgId,
+      ipAddress: req.ip,
+    });
+
+    return res.json({
+      success: true,
+      data: { secret: newSecret },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 export { router as adminRouter };

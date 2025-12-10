@@ -172,6 +172,7 @@ model Organization {
   meetings        Meeting[]
   ssoConfigs      SsoConfig[]
   apiKeys         ApiKey[]
+  webhooks        Webhook[]
   backups         Backup[]
   guestOrgs       GuestOrganization[]
   federationBridgesAsSource   FederationBridge[] @relation("SourceOrg")
@@ -1052,6 +1053,47 @@ model ApiKey {
   organization    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
+  @@schema("public")
+}
+
+// =============================================================================
+// WEBHOOKS
+// =============================================================================
+
+model Webhook {
+  id              String         @id @default(uuid()) @db.Uuid
+  orgId           String         @db.Uuid
+
+  name            String
+  url             String
+  secret          String         // For signature verification
+
+  // Events to trigger
+  events          String[]       @default([])  // message.created, user.joined, meeting.started, etc.
+
+  // Status
+  enabled         Boolean        @default(true)
+
+  // Retry configuration
+  maxRetries      Int            @default(3)
+  retryDelayMs    Int            @default(1000)
+
+  // Stats
+  lastTriggeredAt DateTime?
+  lastSuccessAt   DateTime?
+  lastFailureAt   DateTime?
+  failureCount    Int            @default(0)
+  successCount    Int            @default(0)
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+  createdBy       String         @db.Uuid
+  updatedAt       DateTime       @updatedAt
+
+  organization    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([enabled])
   @@schema("public")
 }
 

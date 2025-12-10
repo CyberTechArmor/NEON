@@ -434,4 +434,44 @@ export const adminApi = {
 
     regenerate: () => api.post<ApiResponse<{ enabled: boolean; email: string; password: string; userId: string }>>('/admin/demo-user/regenerate'),
   },
+
+  // Developer tools
+  developers: {
+    // Events and scopes
+    getEvents: () => api.get<ApiResponse<{ id: string; name: string; description: string }[]>>('/admin/developers/events'),
+    getScopes: () => api.get<ApiResponse<{ id: string; name: string; description: string }[]>>('/admin/developers/scopes'),
+
+    // API Keys
+    apiKeys: {
+      list: (params?: { page?: number; limit?: number }) =>
+        api.get<ApiResponse<unknown[]>>('/admin/developers/api-keys', { params }),
+
+      create: (data: { name: string; scopes?: string[]; rateLimit?: number; expiresAt?: string }) =>
+        api.post<ApiResponse<{ id: string; name: string; key: string; keyPrefix: string; scopes: string[]; createdAt: string }>>('/admin/developers/api-keys', data),
+
+      revoke: (id: string) => api.delete(`/admin/developers/api-keys/${id}`),
+    },
+
+    // Webhooks
+    webhooks: {
+      list: (params?: { page?: number; limit?: number }) =>
+        api.get<ApiResponse<unknown[]>>('/admin/developers/webhooks', { params }),
+
+      get: (id: string) => api.get<ApiResponse<unknown>>(`/admin/developers/webhooks/${id}`),
+
+      create: (data: { name: string; url: string; events: string[]; enabled?: boolean }) =>
+        api.post<ApiResponse<{ id: string; name: string; url: string; secret: string; events: string[] }>>('/admin/developers/webhooks', data),
+
+      update: (id: string, data: { name?: string; url?: string; events?: string[]; enabled?: boolean }) =>
+        api.patch<ApiResponse<unknown>>(`/admin/developers/webhooks/${id}`, data),
+
+      delete: (id: string) => api.delete(`/admin/developers/webhooks/${id}`),
+
+      test: (id: string) =>
+        api.post<ApiResponse<{ success: boolean; statusCode?: number; latency: number; message: string }>>(`/admin/developers/webhooks/${id}/test`),
+
+      regenerateSecret: (id: string) =>
+        api.post<ApiResponse<{ secret: string }>>(`/admin/developers/webhooks/${id}/regenerate-secret`),
+    },
+  },
 };
