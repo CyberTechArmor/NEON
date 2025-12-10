@@ -101,7 +101,7 @@ async function checkStorageHealth(orgId: string): Promise<{ healthy: boolean; me
 async function checkLiveKitHealth(): Promise<{ healthy: boolean; message: string }> {
   try {
     // Check if LiveKit is configured
-    if (!config.livekit?.host || !config.livekit?.apiKey) {
+    if (!config.livekit?.apiUrl || !config.livekit?.apiKey) {
       return {
         healthy: false,
         message: 'LiveKit not configured',
@@ -109,7 +109,7 @@ async function checkLiveKitHealth(): Promise<{ healthy: boolean; message: string
     }
 
     // Simple connectivity check - ping the LiveKit server
-    const response = await fetch(`${config.livekit.host}/health`, {
+    const response = await fetch(`${config.livekit.apiUrl}/health`, {
       method: 'GET',
       signal: AbortSignal.timeout(5000),
     }).catch(() => null);
