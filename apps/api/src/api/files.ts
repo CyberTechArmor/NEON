@@ -132,7 +132,7 @@ router.post(
         url = await S3Service.getSignedUrl(bucket, key);
       }
 
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
         data: {
           id: file.id,
@@ -144,7 +144,7 @@ router.post(
         meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 );
