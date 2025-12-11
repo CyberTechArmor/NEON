@@ -82,9 +82,12 @@ jobs:
           cp docker/docker-compose.yml.example docker/docker-compose.yml
           echo "✓ Copied docker-compose.yml.example to docker-compose.yml"
 
-      - name: Build Docker images
+      - name: Build Docker images (production target)
         working-directory: docker
+        env:
+          BUILD_TARGET: production
         run: |
+          echo "Building with BUILD_TARGET=production for smoke tests..."
           docker compose build --no-cache
 
       - name: Start infrastructure services
@@ -105,15 +108,27 @@ jobs:
 
       - name: Start API service
         working-directory: docker
+        env:
+          BUILD_TARGET: production
         run: |
           docker compose up -d api
 
       - name: Wait for API healthcheck
+        working-directory: docker
         run: |
           echo "Waiting for API to be healthy (this may take a few minutes)..."
+          echo "Showing initial API logs..."
+          docker compose logs api --tail=20
+          echo "---"
           timeout 180 bash -c '
+            counter=0
             until curl -sf http://localhost:3001/health > /dev/null 2>&1; do
-              echo "  API not ready yet, waiting..."
+              echo "  API not ready yet, waiting... (attempt $((++counter)))"
+              if [ $((counter % 6)) -eq 0 ]; then
+                echo "  --- Recent API logs ---"
+                docker compose logs api --tail=10 2>/dev/null || true
+                echo "  ---"
+              fi
               sleep 5
             done
           '
@@ -121,6 +136,8 @@ jobs:
 
       - name: Start Web service
         working-directory: docker
+        env:
+          BUILD_TARGET: production
         run: |
           docker compose up -d web
 
