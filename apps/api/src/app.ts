@@ -51,7 +51,7 @@ export function createApp(): Express {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", 'https://unpkg.com'],
+          scriptSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'], // unsafe-inline needed for API docs
           styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
           imgSrc: ["'self'", 'data:', 'blob:'],
           connectSrc: ["'self'", config.livekit.url],
