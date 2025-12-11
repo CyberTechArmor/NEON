@@ -49,7 +49,8 @@ RUN npm run db:generate
 EXPOSE 3001
 
 # Development mode with hot reload
-CMD ["npm", "run", "dev", "--filter=@neon/api"]
+# Use turbo directly since it's installed globally and --filter is a turbo flag
+CMD ["turbo", "run", "dev", "--filter=@neon/api"]
 
 # -----------------------------------------------------------------------------
 # Builder Stage
