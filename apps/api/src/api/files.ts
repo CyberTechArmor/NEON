@@ -341,7 +341,7 @@ router.post('/presign', async (req: Request, res: Response, next: NextFunction) 
 
     console.log(`[files/presign] Generated ${operation} URL for key: ${key}`);
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         url,
@@ -352,7 +352,7 @@ router.post('/presign', async (req: Request, res: Response, next: NextFunction) 
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -423,7 +423,7 @@ router.post('/confirm', async (req: Request, res: Response, next: NextFunction) 
 
     console.log(`[files/confirm] File confirmed: ${file.id} (${filename})`);
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       data: {
         id: file.id,
@@ -435,7 +435,7 @@ router.post('/confirm', async (req: Request, res: Response, next: NextFunction) 
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
