@@ -239,26 +239,51 @@ export function createApp(): Express {
     });
   });
 
-  // API Documentation redirect
+  // API Documentation HTML page
+  const apiDocsHtml = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEON API Documentation</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui.css">
+  <style>
+    body { margin: 0; padding: 0; }
+    .swagger-ui .topbar { display: none; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = () => {
+      SwaggerUIBundle({
+        url: '/api/events/docs',
+        dom_id: '#swagger-ui',
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIBundle.SwaggerUIStandalonePreset
+        ],
+        layout: "BaseLayout",
+        deepLinking: true,
+        showExtensions: true,
+        showCommonExtensions: true
+      });
+    };
+  </script>
+</body>
+</html>
+  `.trim();
+
+  // API Documentation - serve HTML page directly at /api and /api/docs
   app.get('/api/docs', (_req: Request, res: Response) => {
-    res.redirect('/api/events/docs/html');
+    res.type('html').send(apiDocsHtml);
   });
 
-  // API base path - show API info or redirect to docs
+  // API base path - serve API docs HTML page
   app.get('/api', (_req: Request, res: Response) => {
-    res.json({
-      name: 'NEON API',
-      version: '0.1.0',
-      status: 'operational',
-      documentation: '/api/docs',
-      endpoints: {
-        health: '/api/health',
-        storage: '/api/storage/health',
-        docs: '/api/docs',
-        events: '/api/events',
-      },
-      timestamp: new Date().toISOString(),
-    });
+    res.type('html').send(apiDocsHtml);
   });
 
   // System initialization status (public, no auth required)

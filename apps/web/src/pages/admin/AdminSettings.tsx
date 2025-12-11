@@ -184,17 +184,32 @@ export function AdminSettings() {
     },
   });
 
-  // Test connection
+  // Test connection and auto-save on success
   const testConnection = async () => {
     setTestingConnection(true);
     setConnectionStatus('untested');
     try {
-      await adminApi.testStorageConnection({
+      const response = await adminApi.testAndSaveStorage({
         ...formData,
         secretAccessKey: formData.secretAccessKey || settings?.storage?.secretAccessKey,
       });
-      setConnectionStatus('success');
-      toast.success('Connection successful!');
+      const result = response.data.data;
+
+      if (result.testSuccess && result.saved) {
+        setConnectionStatus('success');
+        toast.success('Connection successful - settings saved automatically!');
+        // Refresh settings to get the saved data
+        queryClient.invalidateQueries({ queryKey: ['admin', 'settings'] });
+      } else if (result.testSuccess) {
+        setConnectionStatus('success');
+        toast.success('Connection successful!');
+      } else {
+        setConnectionStatus('error');
+        const errorMsg = result.suggestion
+          ? `${result.message}\n${result.suggestion}`
+          : result.message;
+        toast.error(errorMsg);
+      }
     } catch (error) {
       setConnectionStatus('error');
       toast.error('Connection failed: ' + getErrorMessage(error));
@@ -419,55 +434,31 @@ export function AdminSettings() {
                 </label>
               </div>
 
-              {/* Test connection */}
-              <div className="flex items-center gap-4">
+              {/* Test connection and auto-save */}
+              <div className="flex flex-wrap items-center gap-4">
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn-primary"
                   onClick={testConnection}
-                  disabled={testingConnection || !formData.bucket || !formData.accessKeyId}
+                  disabled={testingConnection || !formData.bucket || !formData.accessKeyId || (!formData.secretAccessKey && !settings?.storage?.secretAccessKey)}
                 >
                   {testingConnection ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Testing...</span>
+                      <span>Testing & Saving...</span>
                     </>
                   ) : (
-                    <span>Test Connection</span>
+                    <>
+                      <Cloud className="w-4 h-4" />
+                      <span>Test Connection & Save</span>
+                    </>
                   )}
                 </button>
                 {connectionStatus === 'success' && (
-                  <>
-                    <span className="flex items-center gap-2 text-neon-success">
-                      <Check className="w-4 h-4" />
-                      Connection successful
-                    </span>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => {
-                        // Only include secretAccessKey if user entered a new one
-                        const storageData = { ...formData };
-                        if (!storageData.secretAccessKey) {
-                          delete storageData.secretAccessKey;
-                        }
-                        saveMutation.mutate({ storage: storageData });
-                      }}
-                      disabled={saveMutation.isPending}
-                    >
-                      {saveMutation.isPending ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Saving...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Save className="w-4 h-4" />
-                          <span>Save S3 Settings</span>
-                        </>
-                      )}
-                    </button>
-                  </>
+                  <span className="flex items-center gap-2 text-neon-success">
+                    <Check className="w-4 h-4" />
+                    Connected and saved!
+                  </span>
                 )}
                 {connectionStatus === 'error' && (
                   <span className="flex items-center gap-2 text-neon-error">
@@ -476,6 +467,40 @@ export function AdminSettings() {
                   </span>
                 )}
               </div>
+
+              {/* Manual save button as fallback */}
+              {connectionStatus === 'success' && (
+                <div className="flex items-center gap-2 mt-4 pt-4 border-t border-neon-border">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      // Only include secretAccessKey if user entered a new one
+                      const storageData = { ...formData };
+                      if (!storageData.secretAccessKey) {
+                        delete storageData.secretAccessKey;
+                      }
+                      saveMutation.mutate({ storage: storageData });
+                    }}
+                    disabled={saveMutation.isPending}
+                  >
+                    {saveMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Save Again</span>
+                      </>
+                    )}
+                  </button>
+                  <span className="text-sm text-neon-text-muted">
+                    Use this if you need to update settings after testing
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>

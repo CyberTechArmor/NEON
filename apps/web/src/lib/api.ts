@@ -478,6 +478,9 @@ export const adminApi = {
 
     testStorageConnection: (config: Record<string, unknown>) =>
       api.post<ApiResponse<{ success: boolean; message?: string }>>('/admin/organization/test-storage', config),
+
+    testAndSaveStorage: (config: Record<string, unknown>) =>
+      api.post<ApiResponse<{ testSuccess: boolean; saved: boolean; message: string; suggestion?: string; config?: Record<string, unknown> }>>('/admin/organization/test-and-save-storage', config),
   },
 
   // Top-level convenience methods for settings
@@ -488,6 +491,9 @@ export const adminApi = {
 
   testStorageConnection: (config: Record<string, unknown>) =>
     api.post<ApiResponse<{ success: boolean; message?: string }>>('/admin/organization/test-storage', config),
+
+  testAndSaveStorage: (config: Record<string, unknown>) =>
+    api.post<ApiResponse<{ testSuccess: boolean; saved: boolean; message: string; suggestion?: string; config?: Record<string, unknown> }>>('/admin/organization/test-and-save-storage', config),
 
   // Demo user management
   demoUser: {

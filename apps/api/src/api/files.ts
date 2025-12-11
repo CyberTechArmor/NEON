@@ -16,6 +16,42 @@ const config = getConfig();
 const router = Router();
 router.use(authenticate);
 
+/**
+ * Sanitize a string for use in S3 object keys
+ * Replaces special characters that can cause issues with S3 operations
+ */
+function sanitizeForS3Key(value: string): string {
+  // Replace characters that are problematic in S3 keys
+  // Keep alphanumeric, dots, hyphens, underscores, and forward slashes (for path structure)
+  // Also keep unicode letters and numbers for international filenames
+  return value
+    .replace(/[^\p{L}\p{N}._\-/]/gu, '_') // Replace non-safe chars with underscore
+    .replace(/_+/g, '_') // Collapse multiple underscores
+    .replace(/^_|_$/g, ''); // Remove leading/trailing underscores
+}
+
+/**
+ * Sanitize filename specifically - more restrictive than general S3 key
+ */
+function sanitizeFilename(filename: string): string {
+  // Keep the file extension separate
+  const lastDot = filename.lastIndexOf('.');
+  let name = lastDot > 0 ? filename.substring(0, lastDot) : filename;
+  const ext = lastDot > 0 ? filename.substring(lastDot) : '';
+
+  // Sanitize the name part
+  name = name
+    .replace(/[^\p{L}\p{N}._\-]/gu, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    || 'file'; // Fallback if name becomes empty
+
+  // Sanitize extension (just alphanumeric)
+  const sanitizedExt = ext.replace(/[^a-zA-Z0-9.]/g, '');
+
+  return name + sanitizedExt;
+}
+
 // Configure multer for memory storage
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -123,7 +159,9 @@ router.post(
       }
 
       // Upload to S3 (use org-specific storage if configured)
-      const key = `${req.orgId}/${req.userId}/${Date.now()}-${req.file.originalname}`;
+      // Sanitize filename to handle special characters that can cause S3 issues
+      const safeFilename = sanitizeFilename(req.file.originalname);
+      const key = `${req.orgId}/${req.userId}/${Date.now()}-${safeFilename}`;
 
       // Try org-specific storage first, fall back to default
       let bucket: string;
@@ -313,9 +351,9 @@ router.post('/presign', async (req: Request, res: Response, next: NextFunction) 
       }
     }
 
-    // Generate a unique key for the file
-    const sanitizedFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const key = `${req.orgId}/${req.userId}/${Date.now()}-${sanitizedFilename}`;
+    // Generate a unique key for the file with sanitized filename
+    const safeFilename = sanitizeFilename(filename);
+    const key = `${req.orgId}/${req.userId}/${Date.now()}-${safeFilename}`;
 
     // Generate pre-signed URL based on operation
     let url: string;
