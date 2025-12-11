@@ -674,6 +674,7 @@ export async function getUploadSignedUrl(
 
 /**
  * Copy a file using native S3 copy operation
+ * The CopySource must be URL-encoded to handle special characters
  */
 export async function copyFile(
   sourceBucket: string,
@@ -683,11 +684,14 @@ export async function copyFile(
 ): Promise<void> {
   const client = getClient();
 
+  // URL-encode the source key to handle special characters properly
+  const encodedSourceKey = sourceKey.split('/').map(encodeURIComponent).join('/');
+
   await client.send(
     new CopyObjectCommand({
       Bucket: destBucket,
       Key: destKey,
-      CopySource: `${sourceBucket}/${sourceKey}`,
+      CopySource: `${sourceBucket}/${encodedSourceKey}`,
     })
   );
 }

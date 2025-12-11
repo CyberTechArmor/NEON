@@ -1601,6 +1601,152 @@ router.post('/organization/test-storage-file', requirePermission('org:manage_set
   }
 });
 
+/**
+ * POST /admin/organization/test-and-save-storage
+ * Test S3 storage connection and automatically save settings if successful
+ * This is the recommended endpoint for the settings UI
+ */
+router.post('/organization/test-and-save-storage', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { endpoint, bucket, region, accessKeyId, secretAccessKey, forcePathStyle, provider, publicUrl, enabled } = req.body;
+
+    // Validate required fields
+    const missingFields: string[] = [];
+    if (!endpoint) missingFields.push('endpoint');
+    if (!bucket) missingFields.push('bucket');
+    if (!accessKeyId) missingFields.push('accessKeyId');
+    if (!secretAccessKey) missingFields.push('secretAccessKey');
+
+    if (missingFields.length > 0) {
+      return res.json({
+        success: true,
+        data: {
+          testSuccess: false,
+          saved: false,
+          message: `Missing required fields: ${missingFields.join(', ')}`,
+          missingFields,
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Create a temporary S3 client with the provided config
+    const testClient = new S3Client({
+      endpoint,
+      region: region || 'us-east-1',
+      credentials: {
+        accessKeyId,
+        secretAccessKey,
+      },
+      forcePathStyle: forcePathStyle !== false,
+    });
+
+    // Test the connection
+    try {
+      // Try to head the bucket to verify access
+      await testClient.send(new HeadBucketCommand({ Bucket: bucket }));
+
+      // Also try to list objects (limited to 1) to verify read access
+      await testClient.send(new ListObjectsV2Command({ Bucket: bucket, MaxKeys: 1 }));
+
+      // Connection successful - now save the settings
+      const org = await prisma.organization.findUnique({
+        where: { id: req.orgId! },
+        select: { settings: true },
+      });
+
+      const existingSettings = (org?.settings as Record<string, any>) || {};
+
+      // Merge storage settings
+      const storageSettings = {
+        enabled: enabled !== false,
+        provider: provider || 'custom',
+        endpoint,
+        bucket,
+        region: region || 'us-east-1',
+        accessKeyId,
+        secretAccessKey,
+        forcePathStyle: forcePathStyle !== false,
+        publicUrl: publicUrl || '',
+      };
+
+      const updatedSettings = {
+        ...existingSettings,
+        storage: storageSettings,
+      };
+
+      // Save to database
+      await prisma.organization.update({
+        where: { id: req.orgId! },
+        data: { settings: updatedSettings },
+      });
+
+      // Clear S3 cache for this org
+      clearOrgS3Cache(req.orgId!);
+
+      // Log the action
+      await AuditService.log({
+        action: 'organization.storage_settings_updated',
+        resourceType: 'organization',
+        resourceId: req.orgId!,
+        actorId: req.userId,
+        orgId: req.orgId,
+        details: { provider: provider || 'custom', bucket, endpoint },
+        ipAddress: req.ip,
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          testSuccess: true,
+          saved: true,
+          message: 'Connection successful and settings saved!',
+          config: {
+            provider: provider || 'custom',
+            endpoint,
+            bucket,
+            region: region || 'us-east-1',
+            enabled: enabled !== false,
+          },
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    } catch (s3Error: any) {
+      const errorMessage = s3Error.message || 'Unknown error';
+      const errorCode = s3Error.Code || s3Error.name || 'UNKNOWN';
+
+      // Provide helpful error messages
+      let suggestion = '';
+      if (errorCode === 'InvalidAccessKeyId' || errorCode === 'SignatureDoesNotMatch') {
+        suggestion = 'Check your Access Key ID and Secret Access Key.';
+      } else if (errorCode === 'NoSuchBucket') {
+        suggestion = `Bucket "${bucket}" does not exist. Create it first.`;
+      } else if (errorMessage.includes('ECONNREFUSED')) {
+        suggestion = 'Cannot connect to the endpoint. Check if the S3 service is running.';
+      } else if (errorMessage.includes('ENOTFOUND') || errorMessage.includes('getaddrinfo')) {
+        suggestion = 'Cannot resolve the endpoint hostname. Check the URL.';
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          testSuccess: false,
+          saved: false,
+          message: `Connection failed: ${errorCode} - ${errorMessage}`,
+          suggestion,
+          error: {
+            code: errorCode,
+            message: errorMessage,
+          },
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+  } catch (error) {
+    return next(error);
+  }
+});
+
 // ============================================================================
 // Demo User Management Routes
 // ============================================================================
