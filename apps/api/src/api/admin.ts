@@ -11,7 +11,7 @@ import { AuditService } from '../services/audit';
 import { checkRedisHealth } from '../services/redis';
 import { getJobStatus, triggerJob } from '../jobs';
 import { hashPassword, generateSecureToken } from '../services/auth';
-import { S3Client, HeadBucketCommand, ListObjectsV2Command, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, HeadBucketCommand, ListObjectsV2Command, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand, _Object, CommonPrefix } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { clearOrgS3Cache, getOrgS3Config } from '../services/s3';
 import { getConfig } from '@neon/config';
@@ -2762,7 +2762,7 @@ router.get('/storage/browse', requirePermission('storage:browse'), async (req: R
     const response = await storage.client.send(command);
 
     // Format objects (files)
-    const objects = (response.Contents || []).map((obj) => ({
+    const objects = (response.Contents || []).map((obj: _Object) => ({
       key: obj.Key,
       size: obj.Size,
       lastModified: obj.LastModified?.toISOString(),
@@ -2771,7 +2771,7 @@ router.get('/storage/browse', requirePermission('storage:browse'), async (req: R
     }));
 
     // Format common prefixes (folders)
-    const folders = (response.CommonPrefixes || []).map((p) => ({
+    const folders = (response.CommonPrefixes || []).map((p: CommonPrefix) => ({
       prefix: p.Prefix,
       name: p.Prefix?.replace(prefix, '').replace(/\/$/, ''),
     }));
