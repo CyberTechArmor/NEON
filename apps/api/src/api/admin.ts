@@ -11,7 +11,8 @@ import { AuditService } from '../services/audit';
 import { checkRedisHealth } from '../services/redis';
 import { getJobStatus, triggerJob } from '../jobs';
 import { hashPassword, generateSecureToken } from '../services/auth';
-import { S3Client, HeadBucketCommand, ListObjectsV2Command, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, HeadBucketCommand, ListObjectsV2Command, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand, _Object, CommonPrefix } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { clearOrgS3Cache, getOrgS3Config } from '../services/s3';
 import { getConfig } from '@neon/config';
 import {
@@ -2683,6 +2684,297 @@ router.post('/developers/webhooks/:id/regenerate-secret', requirePermission('org
     });
   } catch (error) {
     return next(error);
+  }
+});
+
+// ============================================================
+// Storage Browser Endpoints
+// ============================================================
+
+/**
+ * Helper function to get S3 client for storage browsing
+ */
+async function getStorageClient(orgId: string): Promise<{ client: S3Client; bucket: string } | null> {
+  const orgConfig = await getOrgS3Config(orgId);
+
+  if (orgConfig && orgConfig.enabled) {
+    return {
+      client: new S3Client({
+        endpoint: orgConfig.endpoint,
+        region: orgConfig.region,
+        credentials: {
+          accessKeyId: orgConfig.accessKeyId,
+          secretAccessKey: orgConfig.secretAccessKey,
+        },
+        forcePathStyle: orgConfig.forcePathStyle,
+      }),
+      bucket: orgConfig.bucket,
+    };
+  }
+
+  // Fall back to default storage config
+  if (config.s3.endpoint && config.s3.accessKey && config.s3.secretKey) {
+    return {
+      client: new S3Client({
+        endpoint: config.s3.endpoint,
+        region: config.s3.region,
+        credentials: {
+          accessKeyId: config.s3.accessKey,
+          secretAccessKey: config.s3.secretKey,
+        },
+        forcePathStyle: config.s3.forcePathStyle,
+      }),
+      bucket: config.s3.bucketMedia,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * GET /admin/storage/browse
+ * Browse storage objects with optional prefix (folder-like navigation)
+ */
+router.get('/storage/browse', requirePermission('storage:browse'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const prefix = (req.query.prefix as string) || '';
+    const delimiter = req.query.flat === 'true' ? undefined : '/'; // Use delimiter for folder-like browsing
+    const maxKeys = Math.min(parseInt(req.query.limit as string) || 100, 1000);
+    const continuationToken = req.query.cursor as string | undefined;
+
+    const storage = await getStorageClient(req.orgId!);
+    if (!storage) {
+      return res.status(503).json({
+        success: false,
+        error: { code: 'STORAGE_UNAVAILABLE', message: 'Storage is not configured' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const command = new ListObjectsV2Command({
+      Bucket: storage.bucket,
+      Prefix: prefix,
+      Delimiter: delimiter,
+      MaxKeys: maxKeys,
+      ContinuationToken: continuationToken,
+    });
+
+    const response = await storage.client.send(command);
+
+    // Format objects (files)
+    const objects = (response.Contents || []).map((obj: _Object) => ({
+      key: obj.Key,
+      size: obj.Size,
+      lastModified: obj.LastModified?.toISOString(),
+      etag: obj.ETag?.replace(/"/g, ''),
+      storageClass: obj.StorageClass,
+    }));
+
+    // Format common prefixes (folders)
+    const folders = (response.CommonPrefixes || []).map((p: CommonPrefix) => ({
+      prefix: p.Prefix,
+      name: p.Prefix?.replace(prefix, '').replace(/\/$/, ''),
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        objects,
+        folders,
+        prefix,
+        isTruncated: response.IsTruncated,
+        nextCursor: response.NextContinuationToken,
+        keyCount: response.KeyCount,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error: any) {
+    console.error('[Admin] Storage browse error:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'STORAGE_ERROR', message: error.message || 'Failed to browse storage' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  }
+});
+
+/**
+ * GET /admin/storage/object
+ * Get object metadata and signed download URL
+ */
+router.get('/storage/object', requirePermission('storage:browse'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const key = req.query.key as string;
+    if (!key) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Object key is required' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const storage = await getStorageClient(req.orgId!);
+    if (!storage) {
+      return res.status(503).json({
+        success: false,
+        error: { code: 'STORAGE_UNAVAILABLE', message: 'Storage is not configured' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Get object metadata
+    const headCommand = new HeadObjectCommand({
+      Bucket: storage.bucket,
+      Key: key,
+    });
+
+    const metadata = await storage.client.send(headCommand);
+
+    // Generate signed download URL (valid for 1 hour)
+    const getCommand = new GetObjectCommand({
+      Bucket: storage.bucket,
+      Key: key,
+    });
+    const downloadUrl = await getSignedUrl(storage.client, getCommand, { expiresIn: 3600 });
+
+    return res.json({
+      success: true,
+      data: {
+        key,
+        size: metadata.ContentLength,
+        contentType: metadata.ContentType,
+        lastModified: metadata.LastModified?.toISOString(),
+        etag: metadata.ETag?.replace(/"/g, ''),
+        metadata: metadata.Metadata,
+        downloadUrl,
+        expiresIn: 3600,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error: any) {
+    if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Object not found' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+    console.error('[Admin] Storage object error:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'STORAGE_ERROR', message: error.message || 'Failed to get object' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  }
+});
+
+/**
+ * DELETE /admin/storage/object
+ * Delete a storage object
+ */
+router.delete('/storage/object', requirePermission('storage:browse'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const key = req.query.key as string;
+    if (!key) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Object key is required' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const storage = await getStorageClient(req.orgId!);
+    if (!storage) {
+      return res.status(503).json({
+        success: false,
+        error: { code: 'STORAGE_UNAVAILABLE', message: 'Storage is not configured' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Delete the object
+    const deleteCommand = new DeleteObjectCommand({
+      Bucket: storage.bucket,
+      Key: key,
+    });
+
+    await storage.client.send(deleteCommand);
+
+    // Log the deletion
+    await AuditService.log({
+      action: 'storage.object_deleted',
+      resourceType: 'storage_object',
+      resourceId: key,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { key },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+
+    return res.json({
+      success: true,
+      data: { message: 'Object deleted successfully', key },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error: any) {
+    console.error('[Admin] Storage delete error:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'STORAGE_ERROR', message: error.message || 'Failed to delete object' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  }
+});
+
+/**
+ * GET /admin/storage/stats
+ * Get storage statistics
+ */
+router.get('/storage/stats', requirePermission('storage:browse'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const storage = await getStorageClient(req.orgId!);
+    if (!storage) {
+      return res.status(503).json({
+        success: false,
+        error: { code: 'STORAGE_UNAVAILABLE', message: 'Storage is not configured' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Get org storage stats from database
+    const org = await prisma.organization.findUnique({
+      where: { id: req.orgId! },
+      select: { storageUsed: true, storageLimit: true },
+    });
+
+    // Count objects (up to 1000 for performance)
+    const listCommand = new ListObjectsV2Command({
+      Bucket: storage.bucket,
+      MaxKeys: 1000,
+    });
+    const listResponse = await storage.client.send(listCommand);
+
+    const objectCount = listResponse.KeyCount || 0;
+    const hasMore = listResponse.IsTruncated || false;
+
+    return res.json({
+      success: true,
+      data: {
+        storageUsed: org?.storageUsed ? Number(org.storageUsed) : 0,
+        storageLimit: org?.storageLimit ? Number(org.storageLimit) : null,
+        objectCount,
+        hasMoreObjects: hasMore,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error: any) {
+    console.error('[Admin] Storage stats error:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'STORAGE_ERROR', message: error.message || 'Failed to get storage stats' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
   }
 });
 

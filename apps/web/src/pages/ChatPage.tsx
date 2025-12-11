@@ -39,6 +39,7 @@ import { useSocketStore } from '../stores/socket';
 import { useAuthStore } from '../stores/auth';
 import { conversationsApi, messagesApi, usersApi, filesApi, getErrorMessage } from '../lib/api';
 import { useFeatureFlags } from '../hooks/useFeatureFlags';
+import { AttachmentRenderer } from '../components/attachments';
 
 interface UserForChat {
   id: string;
@@ -452,14 +453,17 @@ function MessageBubble({
   onReply,
   onEdit,
   onDelete,
+  richAttachmentsEnabled,
 }: {
   message: any;
   isOwn: boolean;
   onReply: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  richAttachmentsEnabled?: boolean;
 }) {
   const [showMenu, setShowMenu] = useState(false);
+  const hasAttachments = message.attachments && message.attachments.length > 0;
 
   return (
     <div
@@ -498,7 +502,33 @@ function MessageBubble({
         {/* Message bubble */}
         <div className="relative">
           <div className={`message-bubble ${isOwn ? 'message-bubble-own' : 'message-bubble-other'}`}>
-            <p>{message.content}</p>
+            {message.content && <p>{message.content}</p>}
+
+            {/* Attachments */}
+            {hasAttachments && richAttachmentsEnabled && (
+              <AttachmentRenderer
+                attachments={message.attachments}
+                className={message.content ? 'mt-2' : ''}
+              />
+            )}
+
+            {/* Fallback for attachments when rich attachments disabled */}
+            {hasAttachments && !richAttachmentsEnabled && (
+              <div className={message.content ? 'mt-2 space-y-1' : 'space-y-1'}>
+                {message.attachments.map((att: any) => (
+                  <a
+                    key={att.id}
+                    href={att.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-sm text-neon-accent hover:underline"
+                  >
+                    <Paperclip className="w-4 h-4" />
+                    <span className="truncate">{att.filename}</span>
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Actions menu */}
@@ -1151,6 +1181,7 @@ export default function ChatPage() {
                         onDelete={() => {
                           // TODO: Implement delete
                         }}
+                        richAttachmentsEnabled={isFeatureEnabled('rich_attachments')}
                       />
                     ))}
                   </div>

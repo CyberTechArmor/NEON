@@ -190,8 +190,8 @@ export function FeatureFlags() {
                   aria-label={`Toggle ${feature.name}`}
                 >
                   <span
-                    className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-transform ${
-                      isEnabled ? 'translate-x-7' : 'translate-x-1'
+                    className={`absolute left-1 top-1 w-6 h-6 bg-white rounded-full shadow-sm transition-transform ${
+                      isEnabled ? 'translate-x-6' : 'translate-x-0'
                     }`}
                   />
                   <span className="sr-only">

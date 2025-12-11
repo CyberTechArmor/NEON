@@ -19,6 +19,34 @@ const getWsUrl = (): string => {
   return 'http://localhost:3001';
 };
 
+// Reconnection configuration
+const MAX_RECONNECT_DELAY = 30000; // 30 seconds max
+const BASE_RECONNECT_DELAY = 1000; // 1 second initial delay
+
+/**
+ * Calculate exponential backoff delay with jitter
+ */
+function getReconnectDelay(attempt: number): number {
+  const exponentialDelay = Math.min(
+    BASE_RECONNECT_DELAY * Math.pow(2, attempt),
+    MAX_RECONNECT_DELAY
+  );
+  // Add jitter (0-1000ms) to prevent thundering herd
+  const jitter = Math.random() * 1000;
+  return exponentialDelay + jitter;
+}
+
+// Pending message queue for offline sends
+interface PendingMessage {
+  event: string;
+  data: any;
+  timestamp: number;
+}
+
+let pendingMessages: PendingMessage[] = [];
+let reconnectAttempts = 0;
+let manualReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
 interface PresenceUser {
   odId: string;
   status: 'ONLINE' | 'AWAY' | 'DND' | 'OFFLINE' | 'online' | 'away' | 'busy' | 'offline';
@@ -44,11 +72,15 @@ interface TestAlert {
   acknowledged: boolean;
 }
 
+type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+
 interface SocketState {
   socket: Socket | null;
   isConnected: boolean;
+  connectionState: ConnectionState;
   lastConnectedAt: number | null;
   lastActivityAt: number | null;
+  reconnectAttempt: number;
   presence: Record<string, PresenceUser>;
   notifications: Notification[];
   unreadNotificationCount: number;
@@ -57,6 +89,7 @@ interface SocketState {
   // Actions
   connect: () => void;
   disconnect: () => void;
+  reconnect: () => void;
   sendMessage: (conversationId: string, content: string, replyToId?: string) => void;
   editMessage: (messageId: string, content: string) => void;
   deleteMessage: (messageId: string) => void;
@@ -80,8 +113,10 @@ interface SocketState {
 export const useSocketStore = create<SocketState>((set, get) => ({
   socket: null,
   isConnected: false,
+  connectionState: 'disconnected',
   lastConnectedAt: null,
   lastActivityAt: null,
+  reconnectAttempt: 0,
   presence: {},
   notifications: [],
   unreadNotificationCount: 0,
@@ -89,30 +124,73 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
   connect: () => {
     const { accessToken } = useAuthStore.getState();
-    if (!accessToken || get().socket) return;
+    if (!accessToken) return;
+
+    // Don't create duplicate connections
+    const existingSocket = get().socket;
+    if (existingSocket && (existingSocket.connected || get().connectionState === 'connecting')) {
+      return;
+    }
+
+    // Clear any pending manual reconnect timer
+    if (manualReconnectTimer) {
+      clearTimeout(manualReconnectTimer);
+      manualReconnectTimer = null;
+    }
+
+    set({ connectionState: 'connecting' });
 
     const socket = io(getWsUrl(), {
       auth: { token: accessToken },
       transports: ['websocket'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 10,
+      reconnection: false, // We'll handle reconnection manually with exponential backoff
     });
 
     socket.on('connect', () => {
       console.log('[Socket] Connected');
       const now = Date.now();
-      set({ isConnected: true, lastConnectedAt: now, lastActivityAt: now });
+      reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+
+      // Flush pending messages
+      if (pendingMessages.length > 0) {
+        console.log(`[Socket] Flushing ${pendingMessages.length} pending messages`);
+        const messagesToSend = [...pendingMessages];
+        pendingMessages = [];
+        for (const msg of messagesToSend) {
+          // Only send messages that are less than 5 minutes old
+          if (Date.now() - msg.timestamp < 5 * 60 * 1000) {
+            socket.emit(msg.event, msg.data);
+          }
+        }
+      }
+
+      set({
+        isConnected: true,
+        connectionState: 'connected',
+        lastConnectedAt: now,
+        lastActivityAt: now,
+        reconnectAttempt: 0,
+      });
     });
 
     socket.on('disconnect', (reason) => {
       console.log('[Socket] Disconnected:', reason);
-      set({ isConnected: false });
+      set({ isConnected: false, connectionState: 'disconnected' });
+
+      // Handle reconnection based on disconnect reason
+      if (reason === 'io server disconnect') {
+        // Server disconnected us, probably auth issue - don't auto reconnect
+        console.log('[Socket] Server disconnected, not auto-reconnecting');
+      } else if (reason !== 'io client disconnect') {
+        // Client didn't disconnect intentionally, schedule reconnect
+        get().reconnect();
+      }
     });
 
     socket.on('connect_error', (error) => {
       console.error('[Socket] Connection error:', error);
-      set({ isConnected: false });
+      set({ isConnected: false, connectionState: 'disconnected' });
+      get().reconnect();
     });
 
     // Message events - use correct event names matching backend SocketEvents
@@ -314,17 +392,77 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   },
 
   disconnect: () => {
+    // Clear any pending reconnect timer
+    if (manualReconnectTimer) {
+      clearTimeout(manualReconnectTimer);
+      manualReconnectTimer = null;
+    }
+
     const { socket } = get();
     if (socket) {
       socket.disconnect();
-      set({ socket: null, isConnected: false });
+      set({
+        socket: null,
+        isConnected: false,
+        connectionState: 'disconnected',
+        reconnectAttempt: 0,
+      });
     }
+
+    // Clear pending messages on intentional disconnect
+    pendingMessages = [];
+    reconnectAttempts = 0;
+  },
+
+  reconnect: () => {
+    const state = get();
+    const { accessToken } = useAuthStore.getState();
+
+    // Don't reconnect if no access token or already connecting
+    if (!accessToken || state.connectionState === 'connecting') {
+      return;
+    }
+
+    // Don't reconnect if we've exceeded max attempts (20)
+    if (reconnectAttempts >= 20) {
+      console.log('[Socket] Max reconnect attempts reached, giving up');
+      toast.error('Unable to connect. Please refresh the page.');
+      return;
+    }
+
+    // Clean up existing socket
+    if (state.socket) {
+      state.socket.disconnect();
+      set({ socket: null });
+    }
+
+    reconnectAttempts++;
+    const delay = getReconnectDelay(reconnectAttempts);
+
+    console.log(`[Socket] Scheduling reconnect attempt ${reconnectAttempts} in ${Math.round(delay)}ms`);
+    set({ connectionState: 'reconnecting', reconnectAttempt: reconnectAttempts });
+
+    manualReconnectTimer = setTimeout(() => {
+      console.log(`[Socket] Attempting reconnect #${reconnectAttempts}`);
+      get().connect();
+    }, delay);
   },
 
   sendMessage: (conversationId: string, content: string, replyToId?: string) => {
-    const { socket } = get();
-    if (!socket) return;
-    socket.emit('message:send', { conversationId, content, replyToId });
+    const { socket, isConnected } = get();
+    const data = { conversationId, content, replyToId };
+
+    if (socket && isConnected) {
+      socket.emit('message:send', data);
+    } else {
+      // Queue message for later
+      pendingMessages.push({
+        event: 'message:send',
+        data,
+        timestamp: Date.now(),
+      });
+      console.log('[Socket] Message queued for later delivery');
+    }
   },
 
   editMessage: (messageId: string, content: string) => {
@@ -459,3 +597,49 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     set({ activeTestAlert: null });
   },
 }));
+
+// Setup visibility change handler for reconnection on tab focus
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      const state = useSocketStore.getState();
+      const { accessToken } = useAuthStore.getState();
+
+      // Only attempt reconnect if:
+      // 1. We have an access token
+      // 2. We're not connected
+      // 3. We're not already connecting/reconnecting
+      if (
+        accessToken &&
+        !state.isConnected &&
+        state.connectionState === 'disconnected'
+      ) {
+        console.log('[Socket] Tab became visible, attempting reconnect');
+        // Reset reconnect attempts when user returns to tab
+        reconnectAttempts = 0;
+        state.connect();
+      }
+    }
+  });
+
+  // Also handle online/offline events
+  window.addEventListener('online', () => {
+    const state = useSocketStore.getState();
+    const { accessToken } = useAuthStore.getState();
+
+    if (accessToken && !state.isConnected) {
+      console.log('[Socket] Network came online, attempting reconnect');
+      reconnectAttempts = 0;
+      state.connect();
+    }
+  });
+
+  window.addEventListener('offline', () => {
+    console.log('[Socket] Network went offline');
+    // Clear reconnect timer since we can't connect anyway
+    if (manualReconnectTimer) {
+      clearTimeout(manualReconnectTimer);
+      manualReconnectTimer = null;
+    }
+  });
+}

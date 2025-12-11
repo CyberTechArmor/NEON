@@ -38,6 +38,7 @@ import {
   AdminSettings,
   Developers,
   FeatureFlags,
+  StorageBrowser,
 } from './admin';
 
 // Helper function to format bytes
@@ -648,6 +649,12 @@ export default function AdminPage() {
       permission: 'org:manage_settings',
     },
     {
+      to: '/admin/storage',
+      icon: HardDrive,
+      label: 'Storage Browser',
+      permission: 'storage:browse',
+    },
+    {
       to: '/admin/developers',
       icon: Code,
       label: 'Developers',
@@ -696,6 +703,7 @@ export default function AdminPage() {
           <Route path="import" element={<BulkImport />} />
           <Route path="audit" element={<AuditLogViewer />} />
           <Route path="features" element={<FeatureFlags />} />
+          <Route path="storage" element={<StorageBrowser />} />
           <Route path="developers" element={<Developers />} />
           <Route path="settings" element={<AdminSettings />} />
         </Routes>

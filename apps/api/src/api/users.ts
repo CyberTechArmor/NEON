@@ -181,11 +181,13 @@ router.post(
 
 /**
  * PATCH /users/:id
- * Update user
+ * Update user (supports 'me' alias for own profile)
  */
 router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const isOwnProfile = req.params.id === req.userId;
+    // Handle 'me' alias for own profile
+    const targetUserId = req.params.id === 'me' ? req.userId! : req.params.id;
+    const isOwnProfile = targetUserId === req.userId;
     const canEditOthers = req.user?.permissions.includes('users:edit');
 
     if (!isOwnProfile && !canEditOthers) {
@@ -202,7 +204,7 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
     }
 
     const user = await prisma.user.update({
-      where: { id: req.params.id },
+      where: { id: targetUserId },
       data: {
         ...data,
         departmentId: data.departmentId,
