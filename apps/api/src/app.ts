@@ -144,6 +144,40 @@ export function createApp(): Express {
   app.get('/api/storage/health', async (_req: Request, res: Response) => {
     const healthCheck = await performHealthCheck();
     const status = getS3Status();
+    const config = getConfig();
+
+    // Test network reachability separately from S3 auth
+    let networkCheck: { reachable: boolean; latencyMs?: number; error?: string } = {
+      reachable: false,
+    };
+
+    try {
+      const endpointUrl = new URL(config.s3.endpoint);
+      const startTime = Date.now();
+
+      // Simple HTTP request to check if endpoint is reachable (without auth)
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch(config.s3.endpoint, {
+        method: 'GET',
+        signal: controller.signal,
+      }).catch((e) => ({ ok: false, status: 0, error: e }));
+
+      clearTimeout(timeout);
+      const latency = Date.now() - startTime;
+
+      // Any response (even 403 Forbidden) means the endpoint is reachable
+      networkCheck = {
+        reachable: true,
+        latencyMs: latency,
+      };
+    } catch (e: any) {
+      networkCheck = {
+        reachable: false,
+        error: e.message || 'Network check failed',
+      };
+    }
 
     // Determine error type for diagnostics
     let errorType: string | undefined;
@@ -173,8 +207,6 @@ export function createApp(): Express {
     }
 
     // Check if credentials are configured (without exposing them)
-    const config = getConfig();
-    const hasCredentials = !!(config.s3.accessKey && config.s3.secretKey);
     const credentialStatus = {
       accessKeyConfigured: !!config.s3.accessKey,
       secretKeyConfigured: !!config.s3.secretKey,
@@ -191,6 +223,7 @@ export function createApp(): Express {
         error: errorMsg,
         errorType,
         suggestion,
+        network: networkCheck,
         config: {
           endpoint: status.config.endpoint,
           publicEndpoint: config.s3.publicEndpoint || status.config.endpoint,
