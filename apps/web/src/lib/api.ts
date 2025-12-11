@@ -560,4 +560,49 @@ export const adminApi = {
         api.post<ApiResponse<{ secret: string }>>(`/admin/developers/webhooks/${id}/regenerate-secret`),
     },
   },
+
+  // Storage browser
+  storage: {
+    browse: (params?: { prefix?: string; limit?: number; cursor?: string; flat?: boolean }) =>
+      api.get<ApiResponse<{
+        objects: Array<{
+          key: string;
+          size: number;
+          lastModified: string;
+          etag: string;
+          storageClass?: string;
+        }>;
+        folders: Array<{
+          prefix: string;
+          name: string;
+        }>;
+        prefix: string;
+        isTruncated: boolean;
+        nextCursor?: string;
+        keyCount: number;
+      }>>('/admin/storage/browse', { params }),
+
+    getObject: (key: string) =>
+      api.get<ApiResponse<{
+        key: string;
+        size: number;
+        contentType: string;
+        lastModified: string;
+        etag: string;
+        metadata?: Record<string, string>;
+        downloadUrl: string;
+        expiresIn: number;
+      }>>('/admin/storage/object', { params: { key } }),
+
+    deleteObject: (key: string) =>
+      api.delete<ApiResponse<{ message: string; key: string }>>('/admin/storage/object', { params: { key } }),
+
+    getStats: () =>
+      api.get<ApiResponse<{
+        storageUsed: number;
+        storageLimit: number | null;
+        objectCount: number;
+        hasMoreObjects: boolean;
+      }>>('/admin/storage/stats'),
+  },
 };
