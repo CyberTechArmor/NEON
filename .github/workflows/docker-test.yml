@@ -1,0 +1,190 @@
+name: Docker Build & Smoke Test
+
+on:
+  push:
+    paths:
+      - 'docker/**'
+      - 'apps/*/Dockerfile'
+      - 'apps/api/**'
+      - 'apps/web/**'
+      - 'packages/**'
+  pull_request:
+    paths:
+      - 'docker/**'
+      - 'apps/*/Dockerfile'
+      - 'apps/api/**'
+      - 'apps/web/**'
+      - 'packages/**'
+
+jobs:
+  docker-lint:
+    name: Lint Dockerfiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint API Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/Dockerfile.api
+          failure-threshold: error
+
+      - name: Lint Web Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/Dockerfile.web
+          failure-threshold: error
+
+  docker-compose-validate:
+    name: Validate Docker Compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml.example syntax
+        run: |
+          cd docker
+          docker compose -f docker-compose.yml.example config > /dev/null
+          echo "✓ docker-compose.yml.example is valid"
+
+  docker-build-test:
+    name: Build & Smoke Test
+    runs-on: ubuntu-latest
+    needs: [docker-lint, docker-compose-validate]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Retry Docker Buildx setup if failed
+        if: steps.buildx.outcome == 'failure'
+        run: |
+          echo "First Buildx setup failed, retrying after delay..."
+          sleep 10
+          docker buildx create --use --name retry-builder
+          docker buildx inspect --bootstrap
+
+      - name: Verify required config files exist
+        run: |
+          echo "Checking for required configuration files..."
+          if [ ! -f "docker/docker-compose.yml.example" ]; then
+            echo "ERROR: docker/docker-compose.yml.example not found!"
+            exit 1
+          fi
+          echo "✓ docker/docker-compose.yml.example exists"
+          ls -la docker/
+
+      - name: Copy example config to active config
+        run: |
+          cp docker/docker-compose.yml.example docker/docker-compose.yml
+          echo "✓ Copied docker-compose.yml.example to docker-compose.yml"
+
+      - name: Build Docker images
+        working-directory: docker
+        run: |
+          docker compose build --no-cache
+
+      - name: Start infrastructure services
+        working-directory: docker
+        run: |
+          docker compose up -d postgres redis
+
+      - name: Wait for infrastructure
+        working-directory: docker
+        run: |
+          echo "Waiting for PostgreSQL..."
+          timeout 60 bash -c 'until docker compose exec -T postgres pg_isready -U neon; do sleep 2; done'
+          echo "✓ PostgreSQL is ready"
+
+          echo "Waiting for Redis..."
+          timeout 30 bash -c 'until docker compose exec -T redis redis-cli -a neon_redis_dev ping | grep -q PONG; do sleep 2; done'
+          echo "✓ Redis is ready"
+
+      - name: Start API service
+        working-directory: docker
+        run: |
+          docker compose up -d api
+
+      - name: Wait for API healthcheck
+        working-directory: docker
+        run: |
+          echo "Waiting for API to be healthy (this may take a few minutes)..."
+          echo "Showing initial API logs..."
+          docker compose logs api --tail=20
+          echo "---"
+          timeout 180 bash -c '
+            counter=0
+            until curl -sf http://localhost:3001/health > /dev/null 2>&1; do
+              echo "  API not ready yet, waiting... (attempt $((++counter)))"
+              if [ $((counter % 6)) -eq 0 ]; then
+                echo "  --- Recent API logs ---"
+                docker compose logs api --tail=10 2>/dev/null || true
+                echo "  ---"
+              fi
+              sleep 5
+            done
+          '
+          echo "✓ API is healthy"
+
+      - name: Start Web service
+        working-directory: docker
+        run: |
+          docker compose up -d web
+
+      - name: Wait for Web service
+        run: |
+          echo "Waiting for Web to be accessible..."
+          timeout 60 bash -c '
+            until curl -sf http://localhost:3000 > /dev/null 2>&1; do
+              sleep 2
+            done
+          '
+          echo "✓ Web is accessible"
+
+      - name: Test API endpoints
+        run: |
+          echo "Testing API health endpoint..."
+          curl -sf http://localhost:3001/health | jq .
+
+          echo "Testing API status/init endpoint..."
+          curl -sf http://localhost:3001/api/status/init | jq .
+
+      - name: Verify healthcheck tools installed
+        working-directory: docker
+        run: |
+          echo "Verifying wget is available in API container..."
+          docker compose exec -T api which wget
+          echo "✓ wget is installed"
+
+          echo "Verifying curl is available in API container..."
+          docker compose exec -T api which curl
+          echo "✓ curl is installed"
+
+      - name: Show container status
+        if: always()
+        working-directory: docker
+        run: |
+          docker compose ps -a
+
+      - name: Show API logs on failure
+        if: failure()
+        working-directory: docker
+        run: |
+          echo "=== API Logs ==="
+          docker compose logs api --tail=100
+
+      - name: Show Web logs on failure
+        if: failure()
+        working-directory: docker
+        run: |
+          echo "=== Web Logs ==="
+          docker compose logs web --tail=100
+
+      - name: Cleanup
+        if: always()
+        working-directory: docker
+        run: |
+          docker compose down -v

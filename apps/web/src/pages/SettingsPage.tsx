@@ -34,6 +34,7 @@ import {
   playTestAlertSound,
 } from '../stores/notifications';
 import { usersApi, authApi, filesApi, getErrorMessage, api } from '../lib/api';
+import { AvatarUpload } from '../components/AvatarUpload';
 
 // Toggle switch component for better visibility
 function Toggle({
@@ -71,9 +72,6 @@ function Toggle({
 // Profile settings
 function ProfileSettings() {
   const { user, setUser } = useAuthStore();
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
-  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const profileSchema = z.object({
     name: z.string().min(2, 'Name must be at least 2 characters'),
@@ -91,12 +89,12 @@ function ProfileSettings() {
   });
 
   const updateProfileMutation = useMutation({
-    mutationFn: async (data: { name: string }) => {
+    mutationFn: async (data: { displayName: string }) => {
       const response = await usersApi.updateProfile(data);
       return response.data.data;
     },
     onSuccess: (data: any) => {
-      setUser({ ...user!, name: data.name || data.displayName });
+      setUser({ ...user!, name: data.displayName || data.name });
       toast.success('Profile updated');
     },
     onError: (error) => {
@@ -104,53 +102,8 @@ function ProfileSettings() {
     },
   });
 
-  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      toast.error('Please select an image file');
-      return;
-    }
-
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Image must be less than 5MB');
-      return;
-    }
-
-    // Show preview
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setAvatarPreview(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
-
-    // Upload file
-    setIsUploadingAvatar(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('type', 'avatar');
-
-      const uploadResponse = await filesApi.upload(formData);
-      const fileUrl = uploadResponse.data.data?.url;
-
-      // Update profile with new avatar
-      const response = await usersApi.updateProfile({ avatarUrl: fileUrl });
-      setUser({ ...user!, avatarUrl: fileUrl });
-      toast.success('Avatar updated');
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-      setAvatarPreview(null);
-    } finally {
-      setIsUploadingAvatar(false);
-    }
-  };
-
   const onSubmit = (data: { name: string }) => {
-    updateProfileMutation.mutate(data);
+    updateProfileMutation.mutate({ displayName: data.name });
   };
 
   return (
@@ -162,37 +115,14 @@ function ProfileSettings() {
         <div>
           <label className="block text-sm font-medium mb-2">Avatar</label>
           <div className="flex items-center gap-4">
-            <div className="avatar avatar-xl">
-              {avatarPreview || user?.avatarUrl ? (
-                <img
-                  src={avatarPreview || user?.avatarUrl}
-                  alt={user?.name}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <span>{user?.name?.charAt(0).toUpperCase()}</span>
-              )}
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleAvatarChange}
-              className="hidden"
+            <AvatarUpload
+              currentAvatarUrl={user?.avatarUrl}
+              size="lg"
             />
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploadingAvatar}
-            >
-              {isUploadingAvatar ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Camera className="w-4 h-4" />
-              )}
-              <span>{isUploadingAvatar ? 'Uploading...' : 'Change'}</span>
-            </button>
+            <div className="text-sm text-neon-text-muted">
+              <p>Click to upload a new avatar.</p>
+              <p>Max 5MB, JPG/PNG/WebP/GIF supported.</p>
+            </div>
           </div>
         </div>
 

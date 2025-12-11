@@ -278,6 +278,22 @@ export function createSocketServer(httpServer: HttpServer): Server {
     });
 
     // ==========================================================================
+    // Heartbeat / Ping-Pong
+    // ==========================================================================
+
+    socket.on(SocketEvents.PING, () => {
+      // Respond with pong to confirm connection is alive
+      socket.emit(SocketEvents.PONG);
+      // Update user's last active time
+      prisma.user.update({
+        where: { id: userId },
+        data: { lastActiveAt: new Date() },
+      }).catch(() => {
+        // Ignore errors, this is a best-effort update
+      });
+    });
+
+    // ==========================================================================
     // Disconnect
     // ==========================================================================
 

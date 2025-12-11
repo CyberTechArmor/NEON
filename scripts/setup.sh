@@ -730,6 +730,10 @@ FEDERATION_ENABLED=$ENABLE_FEDERATION
 
 # Email
 EMAIL_ENABLED=$ENABLE_EMAIL
+
+# Database Initialization
+# Set to true to seed the database with initial admin user on first startup
+SEED_DATABASE=true
 EOF
 
 if [ "$ENABLE_EMAIL" = "true" ]; then
@@ -788,6 +792,10 @@ S3_BUCKET=$S3_BUCKET
 # Admin
 ADMIN_EMAIL=$ADMIN_EMAIL
 ADMIN_PASSWORD=$ADMIN_PASSWORD
+
+# Database Initialization
+# Set to true to seed the database with initial admin user on first startup
+SEED_DATABASE=true
 EOF
 print_success "Docker environment file created."
 
@@ -1435,12 +1443,42 @@ echo ""
 print_info "Waiting for services to be ready..."
 echo ""
 
-# Wait for PostgreSQL
+# Helper function to check container health via docker inspect
+check_container_healthy() {
+    local service="$1"
+    local container_id
+    container_id=$($DOCKER_COMPOSE_CMD ps -q "$service" 2>/dev/null)
+    if [ -z "$container_id" ]; then
+        return 1
+    fi
+    # Check if container is running
+    local status
+    if [ -n "$DOCKER_CMD" ] && [ "$DOCKER_CMD" = "sudo docker" ]; then
+        status=$(sudo docker inspect --format='{{.State.Status}}' "$container_id" 2>/dev/null)
+    else
+        status=$(docker inspect --format='{{.State.Status}}' "$container_id" 2>/dev/null)
+    fi
+    [ "$status" = "running" ]
+}
+
+# Wait for PostgreSQL (using host-based check via exposed port)
 echo -n "  Waiting for PostgreSQL..."
 for i in {1..30}; do
-    if $DOCKER_COMPOSE_CMD exec -T postgres pg_isready -U neon -d neon &>/dev/null; then
-        echo -e " ${GREEN}ready${NC}"
-        break
+    # First check if container is running
+    if check_container_healthy postgres; then
+        # Try connecting via exposed port from host
+        if command -v pg_isready &>/dev/null; then
+            if pg_isready -h 127.0.0.1 -p 5432 -U neon -d neon &>/dev/null; then
+                echo -e " ${GREEN}ready${NC}"
+                break
+            fi
+        else
+            # Fall back to checking container logs for ready message
+            if $DOCKER_COMPOSE_CMD logs postgres 2>&1 | grep -q "database system is ready to accept connections"; then
+                echo -e " ${GREEN}ready${NC}"
+                break
+            fi
+        fi
     fi
     if [ $i -eq 30 ]; then
         echo -e " ${YELLOW}timeout (continuing anyway)${NC}"
@@ -1448,12 +1486,23 @@ for i in {1..30}; do
     sleep 2
 done
 
-# Wait for Redis
+# Wait for Redis (using host-based check via exposed port)
 echo -n "  Waiting for Redis..."
 for i in {1..30}; do
-    if $DOCKER_COMPOSE_CMD exec -T redis redis-cli -a "$REDIS_PASSWORD" ping &>/dev/null; then
-        echo -e " ${GREEN}ready${NC}"
-        break
+    if check_container_healthy redis; then
+        # Try connecting via exposed port from host
+        if command -v redis-cli &>/dev/null; then
+            if redis-cli -h 127.0.0.1 -p 6379 -a "$REDIS_PASSWORD" ping &>/dev/null 2>&1; then
+                echo -e " ${GREEN}ready${NC}"
+                break
+            fi
+        else
+            # Fall back to checking container logs for ready message
+            if $DOCKER_COMPOSE_CMD logs redis 2>&1 | grep -q "Ready to accept connections"; then
+                echo -e " ${GREEN}ready${NC}"
+                break
+            fi
+        fi
     fi
     if [ $i -eq 30 ]; then
         echo -e " ${YELLOW}timeout (continuing anyway)${NC}"
@@ -1466,7 +1515,7 @@ echo -n "  Waiting for API (this may take a few minutes on first build)..."
 API_READY=false
 for i in {1..120}; do
     # Check if container is running
-    if ! $DOCKER_COMPOSE_CMD ps api 2>/dev/null | grep -q "Up"; then
+    if ! check_container_healthy api; then
         # Container not up yet, show progress
         if [ $((i % 10)) -eq 0 ]; then
             echo -n "."
@@ -1475,12 +1524,27 @@ for i in {1..120}; do
         continue
     fi
 
-    # Container is running, check health endpoint
-    if $DOCKER_COMPOSE_CMD exec -T api wget -q --spider http://localhost:3001/api/health 2>/dev/null || \
-       $DOCKER_COMPOSE_CMD exec -T api curl -sf http://localhost:3001/api/health >/dev/null 2>&1; then
-        echo -e " ${GREEN}ready${NC}"
-        API_READY=true
-        break
+    # Container is running, check health endpoint from host via exposed port
+    # Use curl or wget from host machine (not docker exec)
+    if command -v curl &>/dev/null; then
+        if curl -sf --connect-timeout 2 http://127.0.0.1:3001/api/health >/dev/null 2>&1; then
+            echo -e " ${GREEN}ready${NC}"
+            API_READY=true
+            break
+        fi
+    elif command -v wget &>/dev/null; then
+        if wget -q --spider --timeout=2 http://127.0.0.1:3001/api/health 2>/dev/null; then
+            echo -e " ${GREEN}ready${NC}"
+            API_READY=true
+            break
+        fi
+    else
+        # No curl or wget on host, check container logs for startup message
+        if $DOCKER_COMPOSE_CMD logs api 2>&1 | grep -qE "(Server (is )?listening|API (is )?ready|started on port)"; then
+            echo -e " ${GREEN}ready${NC}"
+            API_READY=true
+            break
+        fi
     fi
 
     # Show progress every 10 iterations
@@ -1503,28 +1567,34 @@ fi
 echo ""
 
 # Initialize database (only if API is ready)
+# Note: The API entrypoint script handles migrations automatically on startup
+# We only need to verify they completed successfully
 if [ "$API_READY" = true ]; then
-    print_info "Initializing database..."
+    print_info "Checking database initialization..."
     echo ""
 
-    echo "  Running migrations..."
-    if $DOCKER_COMPOSE_CMD exec -T api npm run db:migrate 2>&1 | grep -v "^>" | head -20; then
-        print_success "Database migrations complete."
+    # Check API logs for migration status (entrypoint handles migrations)
+    if $DOCKER_COMPOSE_CMD logs api 2>&1 | grep -q "Database migrations completed successfully\|migrations completed\|Prisma.*done"; then
+        print_success "Database migrations complete (handled by API entrypoint)."
     else
-        print_warning "Migration may have had issues. Check logs if needed."
+        print_info "Migrations may still be in progress or handled by entrypoint."
+        echo "  Check API logs for details: cd docker && docker compose logs api"
     fi
 
-    echo ""
-    echo "  Seeding initial data..."
-    if $DOCKER_COMPOSE_CMD exec -T api npm run db:seed 2>&1 | grep -v "^>" | head -20; then
+    # Seeding is handled by the entrypoint when SEED_DATABASE=true
+    if $DOCKER_COMPOSE_CMD logs api 2>&1 | grep -q "seed completed\|Seeding.*complete\|seeded"; then
         print_success "Database seeding complete."
     else
-        print_warning "Seeding may have had issues. Check logs if needed."
+        print_info "Seeding handled by API entrypoint when SEED_DATABASE=true."
     fi
 else
-    print_warning "Skipping database initialization - API not ready."
+    print_warning "Skipping database verification - API not ready."
     echo ""
-    echo "  To initialize the database manually once API is running:"
+    echo "  Database migrations are handled automatically by the API container on startup."
+    echo "  To check status once API is running:"
+    echo "    cd docker && docker compose logs api"
+    echo ""
+    echo "  To manually trigger migrations if needed:"
     echo "    cd docker && docker compose exec api npm run db:migrate"
     echo "    cd docker && docker compose exec api npm run db:seed"
     echo ""

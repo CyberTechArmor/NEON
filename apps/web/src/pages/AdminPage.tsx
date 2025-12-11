@@ -23,6 +23,7 @@ import {
   Upload,
   Settings,
   Code,
+  ToggleLeft,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { adminApi, getErrorMessage } from '../lib/api';
@@ -36,6 +37,8 @@ import {
   BulkImport,
   AdminSettings,
   Developers,
+  FeatureManagement,
+  StorageBrowser,
 } from './admin';
 
 // Helper function to format bytes
@@ -646,12 +649,33 @@ export default function AdminPage() {
       permission: 'org:manage_settings',
     },
     {
+      to: '/admin/features',
+      icon: ToggleLeft,
+      label: 'Features',
+      permission: 'org:manage_settings',
+    },
+    {
+      to: '/admin/storage',
+      icon: HardDrive,
+      label: 'Storage Browser',
+      permission: 'org:manage_settings',
+      superAdminOnly: true,
+    },
+    {
       to: '/admin/settings',
       icon: Settings,
       label: 'Settings',
       permission: 'org:manage_settings',
     },
-  ].filter((item) => hasPermission(item.permission));
+  ].filter((item) => {
+    if (!hasPermission(item.permission)) return false;
+    // Super Admin only items check for role name
+    if (item.superAdminOnly) {
+      const { user } = useAuthStore.getState();
+      return user?.role?.name === 'Super Administrator';
+    }
+    return true;
+  });
 
   return (
     <div className="h-full flex">
@@ -688,6 +712,8 @@ export default function AdminPage() {
           <Route path="import" element={<BulkImport />} />
           <Route path="audit" element={<AuditLogViewer />} />
           <Route path="developers" element={<Developers />} />
+          <Route path="features" element={<FeatureManagement />} />
+          <Route path="storage" element={<StorageBrowser />} />
           <Route path="settings" element={<AdminSettings />} />
         </Routes>
       </div>

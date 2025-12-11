@@ -10,6 +10,7 @@ export * from './types/auth';
 export * from './types/chat';
 export * from './types/meeting';
 export * from './types/events';
+export * from './types/features';
 
 // Validation
 export * from './validation';

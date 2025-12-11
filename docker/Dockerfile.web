@@ -24,7 +24,6 @@ FROM base AS deps
 COPY package.json package-lock.json* turbo.json ./
 COPY apps/web/package.json ./apps/web/
 COPY packages/shared/package.json ./packages/shared/
-COPY packages/ui/package.json ./packages/ui/
 
 # Install dependencies
 RUN npm ci
@@ -36,11 +35,8 @@ FROM base AS development
 
 WORKDIR /app
 
-# Copy dependencies
+# Copy dependencies (npm workspaces hoists all deps to root node_modules)
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
-COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
-COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 
 # Copy source code
 COPY . .
@@ -48,7 +44,8 @@ COPY . .
 EXPOSE 3000
 
 # Development mode with hot reload (Vite)
-CMD ["npm", "run", "dev", "--filter=@neon/web"]
+# Use turbo directly since it's installed globally and --filter is a turbo flag
+CMD ["turbo", "run", "dev", "--filter=@neon/web"]
 
 # -----------------------------------------------------------------------------
 # Builder Stage

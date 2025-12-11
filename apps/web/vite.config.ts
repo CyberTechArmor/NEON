@@ -59,6 +59,10 @@ export default defineConfig({
       },
     }),
   ],
+  // Pre-bundle @neon packages to handle CommonJS exports properly
+  optimizeDeps: {
+    include: ['@neon/shared', '@neon/config'],
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
