@@ -6,6 +6,7 @@ import { useAuthStore } from '../stores/auth';
 import { useSocketStore } from '../stores/socket';
 import { useChatStore } from '../stores/chat';
 import { notificationsApi } from '../lib/api';
+import { useFeatureFlags } from '../hooks/useFeatureFlags';
 import {
   MessageSquare,
   Video,
@@ -38,6 +39,7 @@ interface Notification {
 
 export default function AppLayout() {
   const { user, logout, hasPermission } = useAuthStore();
+  const { isFeatureEnabled } = useFeatureFlags();
   const {
     connect,
     disconnect,
@@ -148,13 +150,17 @@ export default function AppLayout() {
 
   const navItems = [
     { to: '/chat', icon: MessageSquare, label: 'Messages' },
-    { to: '/meetings', icon: Calendar, label: 'Meetings' },
+    ...(isFeatureEnabled('meetings')
+      ? [{ to: '/meetings', icon: Calendar, label: 'Meetings' }]
+      : []),
     { to: '/settings', icon: Settings, label: 'Settings' },
   ];
 
   if (hasPermission('audit:view') || hasPermission('org:view_settings')) {
     navItems.push({ to: '/admin', icon: Shield, label: 'Admin' });
   }
+
+  const meetingsEnabled = isFeatureEnabled('meetings');
 
   return (
     <div className="h-screen bg-neon-bg flex overflow-hidden">
@@ -412,17 +418,27 @@ export default function AppLayout() {
           </NavLink>
 
           {/* Meetings */}
-          <NavLink
-            to="/meetings"
-            className={({ isActive }) =>
-              `flex flex-col items-center justify-center flex-1 h-full ${
-                isActive ? 'text-neon-accent' : 'text-neon-text-muted'
-              }`
-            }
-          >
-            <Calendar className="w-5 h-5" />
-            <span className="text-[10px] mt-0.5">Meetings</span>
-          </NavLink>
+          {meetingsEnabled ? (
+            <NavLink
+              to="/meetings"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center flex-1 h-full ${
+                  isActive ? 'text-neon-accent' : 'text-neon-text-muted'
+                }`
+              }
+            >
+              <Calendar className="w-5 h-5" />
+              <span className="text-[10px] mt-0.5">Meetings</span>
+            </NavLink>
+          ) : (
+            <div
+              className="flex flex-col items-center justify-center flex-1 h-full text-neon-text-muted opacity-50 cursor-not-allowed"
+              title="Meetings coming soon"
+            >
+              <Calendar className="w-5 h-5" />
+              <span className="text-[10px] mt-0.5">Meetings</span>
+            </div>
+          )}
 
           {/* Notifications */}
           <button

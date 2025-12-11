@@ -177,8 +177,29 @@ model Organization {
   guestOrgs       GuestOrganization[]
   federationBridgesAsSource   FederationBridge[] @relation("SourceOrg")
   federationBridgesAsTarget   FederationBridge[] @relation("TargetOrg")
+  featureFlags    OrganizationFeatureFlag[]
 
   @@index([slug])
+  @@schema("public")
+}
+
+// =============================================================================
+// FEATURE FLAGS
+// =============================================================================
+
+model OrganizationFeatureFlag {
+  id              String       @id @default(uuid()) @db.Uuid
+  organizationId  String       @db.Uuid
+  featureKey      String       @db.VarChar(100)
+  enabled         Boolean      @default(false)
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, featureKey])
+  @@index([organizationId])
   @@schema("public")
 }
 

@@ -127,18 +127,19 @@ function ProfileSettings() {
     };
     reader.readAsDataURL(file);
 
-    // Upload file
+    // Upload file using presigned URL (direct browser-to-S3 upload)
     setIsUploadingAvatar(true);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('type', 'avatar');
+      // Rename file to include 'avatar' prefix for clarity in S3
+      const avatarFile = new File([file], `avatar-${Date.now()}.${file.name.split('.').pop()}`, {
+        type: file.type,
+      });
 
-      const uploadResponse = await filesApi.upload(formData);
-      const fileUrl = uploadResponse.data.data?.url;
+      const result = await filesApi.uploadWithPresign(avatarFile);
+      const fileUrl = result.url;
 
-      // Update profile with new avatar
-      const response = await usersApi.updateProfile({ avatarUrl: fileUrl });
+      // Update profile with new avatar URL
+      await usersApi.updateProfile({ avatarUrl: fileUrl });
       setUser({ ...user!, avatarUrl: fileUrl });
       toast.success('Avatar updated');
     } catch (error) {

@@ -38,6 +38,7 @@ import { useChatStore } from '../stores/chat';
 import { useSocketStore } from '../stores/socket';
 import { useAuthStore } from '../stores/auth';
 import { conversationsApi, messagesApi, usersApi, filesApi, getErrorMessage } from '../lib/api';
+import { useFeatureFlags } from '../hooks/useFeatureFlags';
 
 interface UserForChat {
   id: string;
@@ -573,6 +574,7 @@ export default function ChatPage() {
   const [showConversationList, setShowConversationList] = useState(!conversationId);
 
   const { user } = useAuthStore();
+  const { isFeatureEnabled } = useFeatureFlags();
   const {
     conversations,
     messages,
@@ -1084,12 +1086,32 @@ export default function ChatPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                <button className="btn btn-icon btn-ghost hidden sm:flex">
-                  <Phone className="w-5 h-5" />
-                </button>
-                <button className="btn btn-icon btn-ghost">
-                  <Video className="w-5 h-5" />
-                </button>
+                {isFeatureEnabled('voice_calls') ? (
+                  <button className="btn btn-icon btn-ghost hidden sm:flex">
+                    <Phone className="w-5 h-5" />
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-icon btn-ghost hidden sm:flex opacity-50 cursor-not-allowed"
+                    disabled
+                    title="Voice calls coming soon"
+                  >
+                    <Phone className="w-5 h-5" />
+                  </button>
+                )}
+                {isFeatureEnabled('video_calls') ? (
+                  <button className="btn btn-icon btn-ghost">
+                    <Video className="w-5 h-5" />
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-icon btn-ghost opacity-50 cursor-not-allowed"
+                    disabled
+                    title="Video calls coming soon"
+                  >
+                    <Video className="w-5 h-5" />
+                  </button>
+                )}
                 <button className="btn btn-icon btn-ghost">
                   <Info className="w-5 h-5" />
                 </button>

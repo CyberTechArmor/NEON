@@ -302,6 +302,10 @@ export const notificationsApi = {
     api.post('/notifications/push-subscription', subscription),
 };
 
+export const featuresApi = {
+  get: () => api.get<ApiResponse<{ flags: Record<string, boolean> }>>('/features'),
+};
+
 export const adminApi = {
   getHealth: () => api.get<ApiResponse<unknown>>('/admin/health'),
 
@@ -504,6 +508,17 @@ export const adminApi = {
     disable: () => api.post<ApiResponse<{ enabled: boolean }>>('/admin/demo-user/disable'),
 
     regenerate: () => api.post<ApiResponse<{ enabled: boolean; email: string; password: string; userId: string }>>('/admin/demo-user/regenerate'),
+  },
+
+  // Feature flags management
+  features: {
+    get: () => api.get<ApiResponse<{
+      flags: Record<string, boolean>;
+      availableFeatures: Array<{ key: string; name: string; description: string }>;
+    }>>('/admin/features'),
+
+    update: (flags: Record<string, boolean>) =>
+      api.post<ApiResponse<{ flags: Record<string, boolean> }>>('/admin/features', { flags }),
   },
 
   // Developer tools
