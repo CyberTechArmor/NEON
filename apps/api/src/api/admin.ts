@@ -1492,7 +1492,7 @@ router.patch('/features', requirePermission('org:manage_settings'), async (req: 
 
     // Broadcast feature toggle updates via WebSocket (import broadcastToOrg from socket)
     // This will be handled by the socket module - emit event for each changed feature
-    const { broadcastToOrg } = await import('../socket');
+    const { broadcastToOrg } = await import('../socket/index.js');
     for (const [feature, state] of Object.entries(updates)) {
       broadcastToOrg(req.orgId!, 'feature:toggled', {
         feature,
@@ -1505,7 +1505,7 @@ router.patch('/features', requirePermission('org:manage_settings'), async (req: 
 
     const finalFeatures = { ...DEFAULT_FEATURES, ...(org.settings as any)?.features };
 
-    res.json({
+    return res.json({
       success: true,
       data: finalFeatures,
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -1574,7 +1574,7 @@ router.patch('/features/:feature', requirePermission('org:manage_settings'), asy
     });
 
     // Broadcast via WebSocket
-    const { broadcastToOrg } = await import('../socket');
+    const { broadcastToOrg } = await import('../socket/index.js');
     broadcastToOrg(req.orgId!, 'feature:toggled', {
       feature: featureKey,
       state,
@@ -1585,7 +1585,7 @@ router.patch('/features/:feature', requirePermission('org:manage_settings'), asy
 
     const finalFeatures = { ...DEFAULT_FEATURES, ...(org.settings as any)?.features };
 
-    res.json({
+    return res.json({
       success: true,
       data: { feature: featureKey, state, features: finalFeatures },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -2901,7 +2901,7 @@ router.get('/storage-browser/list', requirePermission('org:manage_settings'), as
       ipAddress: req.ip,
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         bucket,
@@ -2948,7 +2948,7 @@ router.get('/storage-browser/download-url', requirePermission('org:manage_settin
       });
     }
 
-    const { getSignedUrlForOrg } = await import('../services/s3');
+    const { getSignedUrlForOrg } = await import('../services/s3.js');
     const signedUrl = await getSignedUrlForOrg(req.orgId!, key, 3600);
 
     await AuditService.log({
@@ -2960,7 +2960,7 @@ router.get('/storage-browser/download-url', requirePermission('org:manage_settin
       ipAddress: req.ip,
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: { url: signedUrl, expiresIn: 3600 },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -2999,7 +2999,7 @@ router.get('/storage-browser/file-info', requirePermission('org:manage_settings'
       });
     }
 
-    const { headObjectForOrg } = await import('../services/s3');
+    const { headObjectForOrg } = await import('../services/s3.js');
     const metadata = await headObjectForOrg(req.orgId!, key);
 
     if (!metadata) {
@@ -3009,7 +3009,7 @@ router.get('/storage-browser/file-info', requirePermission('org:manage_settings'
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         key,
@@ -3054,7 +3054,7 @@ router.delete('/storage-browser/file', requirePermission('org:manage_settings'),
       });
     }
 
-    const { deleteFileForOrg } = await import('../services/s3');
+    const { deleteFileForOrg } = await import('../services/s3.js');
     await deleteFileForOrg(req.orgId!, key);
 
     await AuditService.log({
@@ -3066,7 +3066,7 @@ router.delete('/storage-browser/file', requirePermission('org:manage_settings'),
       ipAddress: req.ip,
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: { message: 'File deleted successfully' },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -3111,7 +3111,7 @@ router.get('/storage-browser/stats', requirePermission('org:manage_settings'), a
       where: { orgId: req.orgId! },
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         totalUsed: Number(orgStats?.storageUsed || 0),
