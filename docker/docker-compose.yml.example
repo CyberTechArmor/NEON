@@ -221,9 +221,10 @@ services:
       - ../packages:/app/packages:ro
     ports:
       - "3000:3000"
+    # Note: Web starts without waiting for API healthcheck
+    # The frontend handles "Waiting for API" gracefully
     depends_on:
-      api:
-        condition: service_healthy
+      - api
     networks:
       - neon-network
 
