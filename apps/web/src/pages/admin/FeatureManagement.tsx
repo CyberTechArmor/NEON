@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
-  Toggle,
+  ToggleLeft,
   Clock,
   Lock,
   Loader2,
@@ -69,7 +69,7 @@ export default function FeatureManagement() {
     queryKey: ['admin-features'],
     queryFn: async () => {
       const response = await adminApi.features.get();
-      const features = response.data.data as OrganizationFeatures;
+      const features = response.data.data as unknown as Partial<OrganizationFeatures>;
       setFeatures(features);
       return features;
     },
@@ -87,7 +87,7 @@ export default function FeatureManagement() {
       toast.success('Feature updated successfully');
       queryClient.invalidateQueries({ queryKey: ['admin-features'] });
       if (data.features) {
-        setFeatures(data.features as OrganizationFeatures);
+        setFeatures(data.features as unknown as Partial<OrganizationFeatures>);
       }
     },
     onError: (error) => {
@@ -105,7 +105,7 @@ export default function FeatureManagement() {
       toast.success('Features updated successfully');
       setPendingChanges({});
       queryClient.invalidateQueries({ queryKey: ['admin-features'] });
-      setFeatures(data as OrganizationFeatures);
+      setFeatures(data as unknown as Partial<OrganizationFeatures>);
     },
     onError: (error) => {
       toast.error(getErrorMessage(error));

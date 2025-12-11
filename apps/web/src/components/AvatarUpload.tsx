@@ -85,7 +85,7 @@ export function AvatarUpload({
     onSuccess: () => {
       toast.success('Avatar removed');
       if (user) {
-        setUser({ ...user, avatarUrl: null });
+        setUser({ ...user, avatarUrl: undefined });
       }
       onAvatarChange?.(null);
     },
@@ -259,7 +259,7 @@ export function AvatarUpload({
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-2xl font-semibold text-neon-text-muted">
-              {user?.name?.charAt(0).toUpperCase() || user?.displayName?.charAt(0).toUpperCase() || '?'}
+              {user?.name?.charAt(0).toUpperCase() || '?'}
             </div>
           )}
         </div>
