@@ -1,10 +1,18 @@
 # =============================================================================
-# NEON Platform - Docker Compose Configuration
+# NEON Platform - Docker Compose Configuration (EXAMPLE/TEMPLATE)
 # =============================================================================
-# Development and production deployment stack
+#
+# This is a TEMPLATE file. To use:
+#   1. Copy to docker-compose.yml: cp docker-compose.yml.example docker-compose.yml
+#   2. Or run setup.sh which generates a customized version automatically
+#
+# IMPORTANT: docker-compose.yml is gitignored to prevent git operations from
+# overwriting your local configuration. Any changes you want to persist should
+# be made to this example file.
+#
 # Usage:
 #   Development: docker compose up -d
-#   Production:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   Production:  Run ./scripts/setup.sh for production configuration with SSL
 # =============================================================================
 
 services:
