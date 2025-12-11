@@ -164,49 +164,60 @@ services:
       SEED_DATABASE: ${SEED_DATABASE:-true}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-thomas@tagarmor.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-d9zuzaZ9b2BMjm6x}
+      # CORS - must include the web app origin
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     volumes:
       - ../apps/api/src:/app/apps/api/src:ro
       - ../packages:/app/packages:ro
     ports:
       - "3001:3001"
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - neon-network
-    profiles:
-      - app
 
   # ---------------------------------------------------------------------------
   # NEON Web Client
   # ---------------------------------------------------------------------------
+  # NOTE: VITE_API_URL must be accessible from the browser (not Docker internal)
+  # For local dev: http://localhost:3001/api
+  # For production: https://yourdomain.com/api (via reverse proxy)
   web:
     build:
       context: ..
       dockerfile: docker/Dockerfile.web
       target: ${BUILD_TARGET:-development}
       args:
-        VITE_API_URL: ${VITE_API_URL:-http://api:3001}
-        VITE_WS_URL: ${VITE_WS_URL:-ws://api:3001}
-        VITE_LIVEKIT_URL: ${VITE_LIVEKIT_URL:-ws://livekit:7880}
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001/api}
+        VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3001}
+        VITE_LIVEKIT_URL: ${VITE_LIVEKIT_URL:-ws://localhost:7880}
     container_name: neon-web
     restart: unless-stopped
     environment:
       NODE_ENV: ${NODE_ENV:-development}
-      VITE_API_URL: ${VITE_API_URL:-http://api:3001}
-      VITE_WS_URL: ${VITE_WS_URL:-ws://api:3001}
-      VITE_LIVEKIT_URL: ${VITE_LIVEKIT_URL:-ws://livekit:7880}
+      # Runtime config - must be browser-accessible URLs (not Docker internal names)
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001/api}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3001}
+      VITE_LIVEKIT_URL: ${VITE_LIVEKIT_URL:-ws://localhost:7880}
     volumes:
       - ../apps/web/src:/app/apps/web/src:ro
       - ../packages:/app/packages:ro
     ports:
       - "3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - neon-network
-    profiles:
-      - app
 
 # =============================================================================
 # Volumes
