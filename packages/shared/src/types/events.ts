@@ -85,6 +85,9 @@ export const SocketEvents = {
   TEST_ALERT_ACKNOWLEDGE: 'test:alert:acknowledge',
   TEST_ALERT_ACKNOWLEDGED: 'test:alert:acknowledged',
 
+  // Feature Toggles
+  FEATURE_TOGGLED: 'feature:toggled',
+
   // Heartbeat
   PING: 'ping',
   PONG: 'pong',
@@ -200,6 +203,9 @@ export interface ServerToClientEvents {
   // Test Alerts
   [SocketEvents.TEST_ALERT]: (alert: TestAlertPayload) => void;
   [SocketEvents.TEST_ALERT_ACKNOWLEDGED]: (data: TestAlertAcknowledgePayload) => void;
+
+  // Feature Toggles
+  [SocketEvents.FEATURE_TOGGLED]: (data: FeatureToggledPayload) => void;
 
   // Heartbeat
   [SocketEvents.PONG]: () => void;
@@ -349,4 +355,12 @@ export interface TestAlertPayload {
 
 export interface TestAlertAcknowledgePayload {
   id: string;
+}
+
+export interface FeatureToggledPayload {
+  feature: string;
+  state: string;
+  orgId?: string;
+  updatedBy?: string;
+  updatedAt: string;
 }

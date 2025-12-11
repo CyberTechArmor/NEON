@@ -384,7 +384,7 @@ router.post('/me/avatar/presign', async (req: Request, res: Response, next: Next
       },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -510,7 +510,7 @@ router.post('/me/avatar/confirm', async (req: Request, res: Response, next: Next
       },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -609,7 +609,7 @@ router.get('/me/avatar-url', async (req: Request, res: Response, next: NextFunct
       },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
