@@ -84,11 +84,6 @@ export default defineConfig({
   },
   build: {
     sourcemap: true,
-    commonjsOptions: {
-      // Include @neon packages for proper CommonJS to ESM transformation
-      include: [/node_modules/, /@neon\//],
-      transformMixedEsModules: true,
-    },
     rollupOptions: {
       output: {
         manualChunks: {
