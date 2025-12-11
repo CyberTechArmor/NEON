@@ -730,6 +730,10 @@ FEDERATION_ENABLED=$ENABLE_FEDERATION
 
 # Email
 EMAIL_ENABLED=$ENABLE_EMAIL
+
+# Database Initialization
+# Set to true to seed the database with initial admin user on first startup
+SEED_DATABASE=true
 EOF
 
 if [ "$ENABLE_EMAIL" = "true" ]; then
@@ -788,6 +792,10 @@ S3_BUCKET=$S3_BUCKET
 # Admin
 ADMIN_EMAIL=$ADMIN_EMAIL
 ADMIN_PASSWORD=$ADMIN_PASSWORD
+
+# Database Initialization
+# Set to true to seed the database with initial admin user on first startup
+SEED_DATABASE=true
 EOF
 print_success "Docker environment file created."
 

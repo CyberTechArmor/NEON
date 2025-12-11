@@ -161,7 +161,7 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
       # Database seeding (set to true to seed on first startup)
-      SEED_DATABASE: ${SEED_DATABASE:-false}
+      SEED_DATABASE: ${SEED_DATABASE:-true}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-thomas@tagarmor.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-d9zuzaZ9b2BMjm6x}
     volumes:
