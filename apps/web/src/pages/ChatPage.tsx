@@ -723,22 +723,22 @@ export default function ChatPage() {
     [addFiles]
   );
 
-  // Upload files helper
+  // Upload files helper - uses pre-signed URL for direct browser-to-S3 upload
   const uploadFiles = async (files: File[]): Promise<string[]> => {
     const uploadedUrls: string[] = [];
 
     for (const file of files) {
-      const formData = new FormData();
-      formData.append('file', file);
-
       try {
-        const response = await filesApi.upload(formData);
-        if (response.data?.data?.url) {
-          uploadedUrls.push(response.data.data.url);
+        // Use pre-signed URL method for direct upload to S3
+        const result = await filesApi.uploadWithPresign(file);
+        if (result.url) {
+          uploadedUrls.push(result.url);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error(`Failed to upload ${file.name}:`, error);
-        toast.error(`Failed to upload ${file.name}`);
+        // Provide more specific error message
+        const errorMsg = error?.response?.data?.error?.message || error?.message || 'Upload failed';
+        toast.error(`Failed to upload ${file.name}: ${errorMsg}`);
       }
     }
 

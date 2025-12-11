@@ -210,18 +210,80 @@ export const callsApi = {
 };
 
 export const filesApi = {
-  getUploadUrl: (filename: string, contentType: string, conversationId?: string) =>
-    api.post<ApiResponse<{ uploadUrl: string; fileId: string; key: string }>>('/files/upload-url', {
+  /**
+   * Get a pre-signed URL for direct browser-to-S3 upload
+   */
+  presign: (filename: string, contentType: string, size?: number) =>
+    api.post<ApiResponse<{ url: string; key: string; bucket: string; expiresIn: number }>>('/files/presign', {
       filename,
       contentType,
-      conversationId,
+      size,
+      operation: 'put',
     }),
+
+  /**
+   * Confirm a direct upload after browser uploads to S3
+   */
+  confirm: (data: { key: string; bucket: string; filename: string; contentType: string; size: number }) =>
+    api.post<ApiResponse<{ id: string; name: string; mimeType: string; size: number; url: string }>>('/files/confirm', data),
+
+  /**
+   * Upload a file using pre-signed URL (recommended method)
+   * 1. Get pre-signed URL from backend
+   * 2. Upload directly to S3
+   * 3. Confirm upload with backend
+   */
+  uploadWithPresign: async (file: File, onProgress?: (percent: number) => void): Promise<{ id: string; url: string; name: string }> => {
+    // Step 1: Get pre-signed URL
+    const presignResponse = await filesApi.presign(file.name, file.type, file.size);
+    const { url: uploadUrl, key, bucket } = presignResponse.data.data;
+
+    // Step 2: Upload directly to S3/MinIO
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', uploadUrl, true);
+      xhr.setRequestHeader('Content-Type', file.type);
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+        } else {
+          reject(new Error(`S3 upload failed with status ${xhr.status}: ${xhr.responseText}`));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Network error during S3 upload'));
+      xhr.send(file);
+    });
+
+    // Step 3: Confirm upload with backend
+    const confirmResponse = await filesApi.confirm({
+      key,
+      bucket,
+      filename: file.name,
+      contentType: file.type,
+      size: file.size,
+    });
+
+    return {
+      id: confirmResponse.data.data.id,
+      url: confirmResponse.data.data.url,
+      name: confirmResponse.data.data.name,
+    };
+  },
 
   getDownloadUrl: (fileId: string) =>
     api.get<ApiResponse<{ downloadUrl: string }>>(`/files/${fileId}/download-url`),
 
   delete: (fileId: string) => api.delete(`/files/${fileId}`),
 
+  // Legacy upload method (server-side upload) - kept for backwards compatibility
   upload: (formData: FormData) =>
     api.post<ApiResponse<{ url: string; fileId: string }>>('/files/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
