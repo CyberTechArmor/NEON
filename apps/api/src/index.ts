@@ -11,7 +11,7 @@ import { createApp } from './app';
 import { createSocketServer } from './socket';
 import { connectRedis, disconnectRedis } from './services/redis';
 import { initializeEventBus, shutdownEventBus } from './services/eventbus';
-import { initializeS3 } from './services/s3';
+import { initializeS3, startHeartbeat, stopHeartbeat } from './services/s3';
 import { initializeWebhookDispatch } from './services/webhookDispatch';
 import { startJobScheduler, stopJobScheduler } from './jobs';
 
@@ -60,6 +60,10 @@ async function main() {
     console.warn('[Server] Starting with degraded S3 functionality - file uploads may fail');
   }
 
+  // Start S3 heartbeat monitoring
+  console.log('[S3] Starting heartbeat monitoring...');
+  startHeartbeat();
+
   // Create Express app
   const app = createApp();
 
@@ -96,6 +100,10 @@ async function main() {
         console.log('[Jobs] Stopping scheduler...');
         stopJobScheduler();
       }
+
+      // Stop S3 heartbeat
+      console.log('[S3] Stopping heartbeat...');
+      stopHeartbeat();
 
       // Shutdown EventBus
       console.log('[EventBus] Shutting down...');

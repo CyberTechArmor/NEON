@@ -29,6 +29,7 @@ import { notificationsRouter } from './api/notifications';
 import { adminRouter } from './api/admin';
 import { webhooksRouter } from './api/webhooks';
 import { eventsRouter } from './api/events';
+import { getS3Status, performHealthCheck } from './services/s3';
 
 const config = getConfig();
 
@@ -137,6 +138,35 @@ export function createApp(): Express {
       status: 'ready',
       timestamp: new Date().toISOString(),
     });
+  });
+
+  // S3 Storage health check endpoint
+  app.get('/api/storage/health', async (_req: Request, res: Response) => {
+    const healthCheck = await performHealthCheck();
+    const status = getS3Status();
+
+    res.status(healthCheck.success ? 200 : 503).json({
+      success: healthCheck.success,
+      data: {
+        connected: status.connected,
+        latencyMs: healthCheck.latencyMs,
+        lastHealthCheck: status.lastHealthCheck,
+        error: healthCheck.error || status.lastError,
+        config: {
+          endpoint: status.config.endpoint,
+          bucket: status.config.bucket,
+          region: status.config.region,
+        },
+      },
+      meta: {
+        timestamp: new Date().toISOString(),
+      },
+    });
+  });
+
+  // API Documentation redirect
+  app.get('/api/docs', (_req: Request, res: Response) => {
+    res.redirect('/api/events/docs/html');
   });
 
   // System initialization status (public, no auth required)

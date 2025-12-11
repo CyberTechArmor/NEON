@@ -462,7 +462,7 @@ function MessageBubble({
 
   return (
     <div
-      className={`group flex items-start gap-3 ${isOwn ? 'flex-row-reverse' : ''}`}
+      className={`group flex items-start gap-3 px-2 ${isOwn ? 'flex-row-reverse' : ''}`}
     >
       {/* Avatar (only for others) */}
       {!isOwn && (
@@ -1014,7 +1014,7 @@ export default function ChatPage() {
         className={`
           ${!showConversationList ? 'flex' : 'hidden'}
           lg:flex
-          flex-1 flex-col min-w-0 relative h-full overflow-hidden
+          flex-1 flex-col min-w-0 relative h-full
         `}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -1096,10 +1096,10 @@ export default function ChatPage() {
               </div>
             </div>
 
-            {/* Messages - scrollable area */}
+            {/* Messages - scrollable area (only this section scrolls) */}
             <div
               ref={messagesContainerRef}
-              className="flex-1 overflow-y-auto p-4 flex flex-col min-h-0"
+              className="flex-1 overflow-y-auto p-4 flex flex-col min-h-0 overflow-x-hidden"
             >
               {isLoadingMessages ? (
                 <div className="flex items-center justify-center py-8 flex-1">
@@ -1114,8 +1114,8 @@ export default function ChatPage() {
                 <>
                   {/* Spacer to push messages to bottom when few messages */}
                   <div className="flex-1 min-h-0" />
-                  {/* Messages container */}
-                  <div className="space-y-4">
+                  {/* Messages container with proper spacing */}
+                  <div className="space-y-3">
                     {currentMessages.map((message) => (
                       <MessageBubble
                         key={message.id}
