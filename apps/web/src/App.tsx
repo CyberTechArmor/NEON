@@ -20,12 +20,8 @@ import AdminPage from './pages/AdminPage';
 // System Pages
 import InitializingPage from './pages/InitializingPage';
 
-// Component to let API routes pass through to the server
-function ApiPassthrough() {
-  // Don't render anything - the browser is expecting a server response
-  // This prevents React Router from redirecting /api/* to /chat
-  return null;
-}
+// Note: /api routes are handled in main.tsx before React renders
+// This prevents React Router from intercepting server API requests
 
 // Protected Route Wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -129,11 +125,7 @@ export default function App() {
         <Route path="admin/*" element={<AdminPage />} />
       </Route>
 
-      {/* API routes - let them pass through to server (don't redirect) */}
-      <Route path="/api" element={<ApiPassthrough />} />
-      <Route path="/api/*" element={<ApiPassthrough />} />
-
-      {/* Fallback */}
+      {/* Fallback - /api routes are handled in main.tsx before React renders */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

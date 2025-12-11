@@ -140,10 +140,47 @@ export function createApp(): Express {
     });
   });
 
-  // S3 Storage health check endpoint
+  // S3 Storage health check endpoint with detailed diagnostics
   app.get('/api/storage/health', async (_req: Request, res: Response) => {
     const healthCheck = await performHealthCheck();
     const status = getS3Status();
+
+    // Determine error type for diagnostics
+    let errorType: string | undefined;
+    let suggestion: string | undefined;
+    const errorMsg = healthCheck.error || status.lastError;
+
+    if (errorMsg) {
+      if (errorMsg.includes('ECONNREFUSED')) {
+        errorType = 'CONNECTION_REFUSED';
+        suggestion = 'S3/MinIO service may not be running. Check if the service is started on the configured endpoint.';
+      } else if (errorMsg.includes('ENOTFOUND') || errorMsg.includes('getaddrinfo')) {
+        errorType = 'DNS_ERROR';
+        suggestion = 'Cannot resolve S3 endpoint hostname. Check S3_ENDPOINT configuration.';
+      } else if (errorMsg.includes('timeout') || errorMsg.includes('Timeout')) {
+        errorType = 'TIMEOUT';
+        suggestion = 'S3 service is not responding. Check network connectivity and firewall rules.';
+      } else if (errorMsg.includes('AccessDenied') || errorMsg.includes('InvalidAccessKeyId') || errorMsg.includes('SignatureDoesNotMatch')) {
+        errorType = 'AUTH_ERROR';
+        suggestion = 'Invalid S3 credentials. Check S3_ACCESS_KEY and S3_SECRET_KEY environment variables.';
+      } else if (errorMsg.includes('NoSuchBucket')) {
+        errorType = 'BUCKET_NOT_FOUND';
+        suggestion = `Bucket "${status.config.bucket}" does not exist. Create it first using MinIO console or mc command.`;
+      } else {
+        errorType = 'UNKNOWN';
+        suggestion = 'Check server logs for detailed error information.';
+      }
+    }
+
+    // Check if credentials are configured (without exposing them)
+    const config = getConfig();
+    const hasCredentials = !!(config.s3.accessKey && config.s3.secretKey);
+    const credentialStatus = {
+      accessKeyConfigured: !!config.s3.accessKey,
+      secretKeyConfigured: !!config.s3.secretKey,
+      accessKeyLength: config.s3.accessKey?.length || 0,
+      secretKeyLength: config.s3.secretKey?.length || 0,
+    };
 
     res.status(healthCheck.success ? 200 : 503).json({
       success: healthCheck.success,
@@ -151,12 +188,17 @@ export function createApp(): Express {
         connected: status.connected,
         latencyMs: healthCheck.latencyMs,
         lastHealthCheck: status.lastHealthCheck,
-        error: healthCheck.error || status.lastError,
+        error: errorMsg,
+        errorType,
+        suggestion,
         config: {
           endpoint: status.config.endpoint,
+          publicEndpoint: config.s3.publicEndpoint || status.config.endpoint,
           bucket: status.config.bucket,
           region: status.config.region,
+          forcePathStyle: status.config.forcePathStyle,
         },
+        credentials: credentialStatus,
       },
       meta: {
         timestamp: new Date().toISOString(),
