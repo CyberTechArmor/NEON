@@ -157,7 +157,7 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-neon-bg flex">
+    <div className="h-screen bg-neon-bg flex overflow-hidden">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
@@ -280,7 +280,7 @@ export default function AppLayout() {
       </aside>
 
       {/* Main content area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top header (mobile) */}
         <header className="lg:hidden flex items-center justify-between h-16 px-4 border-b border-neon-border bg-neon-surface">
           <button
