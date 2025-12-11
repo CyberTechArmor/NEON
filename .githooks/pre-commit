@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+#
+# NEON Pre-commit Hook
+# Validates Docker configuration before allowing commits
+#
+# To enable: git config core.hooksPath .githooks
+#
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+# Get the project root
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+DOCKER_DIR="$PROJECT_ROOT/docker"
+
+# Track if any checks fail
+ERRORS=0
+WARNINGS=0
+
+echo "Running pre-commit checks..."
+echo ""
+
+# Check if Docker files are being committed
+DOCKER_FILES_CHANGED=$(git diff --cached --name-only | grep -E '^docker/|Dockerfile' || true)
+
+if [ -n "$DOCKER_FILES_CHANGED" ]; then
+    echo "Docker files changed, running validation..."
+    echo ""
+
+    # 1. Validate docker-compose.yml.example syntax
+    if [ -f "$DOCKER_DIR/docker-compose.yml.example" ]; then
+        echo -n "  Checking docker-compose.yml.example syntax... "
+        if command -v docker &>/dev/null && docker compose version &>/dev/null; then
+            if docker compose -f "$DOCKER_DIR/docker-compose.yml.example" config > /dev/null 2>&1; then
+                echo -e "${GREEN}OK${NC}"
+            else
+                echo -e "${RED}INVALID${NC}"
+                echo -e "    ${RED}Error: docker-compose.yml.example has invalid syntax${NC}"
+                ((ERRORS++))
+            fi
+        else
+            echo -e "${YELLOW}SKIPPED${NC} (docker not available)"
+        fi
+    fi
+
+    # 2. Check healthcheck tools are in Dockerfile
+    if [ -f "$DOCKER_DIR/Dockerfile.api" ]; then
+        echo -n "  Checking healthcheck tools in Dockerfile.api... "
+
+        # Check what healthcheck command is used
+        HEALTHCHECK_CMD=""
+        if [ -f "$DOCKER_DIR/docker-compose.yml.example" ]; then
+            HEALTHCHECK_CMD=$(grep -A1 'healthcheck:' "$DOCKER_DIR/docker-compose.yml.example" | grep 'test:' | head -1 || true)
+        fi
+
+        if echo "$HEALTHCHECK_CMD" | grep -q "wget"; then
+            if grep -q "wget" "$DOCKER_DIR/Dockerfile.api"; then
+                echo -e "${GREEN}OK${NC}"
+            else
+                echo -e "${RED}MISSING wget${NC}"
+                echo -e "    ${RED}Error: Healthcheck uses wget but it's not installed in Dockerfile.api${NC}"
+                echo -e "    ${RED}Add 'wget' to: RUN apk add --no-cache ...${NC}"
+                ((ERRORS++))
+            fi
+        elif echo "$HEALTHCHECK_CMD" | grep -q "curl"; then
+            if grep -q "curl" "$DOCKER_DIR/Dockerfile.api"; then
+                echo -e "${GREEN}OK${NC}"
+            else
+                echo -e "${RED}MISSING curl${NC}"
+                echo -e "    ${RED}Error: Healthcheck uses curl but it's not installed in Dockerfile.api${NC}"
+                echo -e "    ${RED}Add 'curl' to: RUN apk add --no-cache ...${NC}"
+                ((ERRORS++))
+            fi
+        else
+            echo -e "${GREEN}OK${NC} (no specific tool required)"
+        fi
+    fi
+
+    # 3. Check for Docker internal hostnames in browser-facing URLs
+    if [ -f "$DOCKER_DIR/docker-compose.yml.example" ]; then
+        echo -n "  Checking for Docker internal hostnames in URLs... "
+
+        # These patterns indicate Docker internal hostnames that browsers can't resolve
+        BAD_PATTERNS=(
+            'VITE_API_URL.*http://api:'
+            'VITE_WS_URL.*ws://api:'
+            'VITE_API_URL.*http://web:'
+        )
+
+        FOUND_BAD=false
+        for pattern in "${BAD_PATTERNS[@]}"; do
+            if grep -qE "$pattern" "$DOCKER_DIR/docker-compose.yml.example" 2>/dev/null; then
+                FOUND_BAD=true
+                break
+            fi
+        done
+
+        if [ "$FOUND_BAD" = true ]; then
+            echo -e "${RED}FOUND${NC}"
+            echo -e "    ${RED}Error: Browser-facing URLs use Docker internal hostnames${NC}"
+            echo -e "    ${RED}VITE_API_URL, VITE_WS_URL must use localhost or actual domain${NC}"
+            echo -e "    ${RED}Example: http://localhost:3001/api (not http://api:3001)${NC}"
+            ((ERRORS++))
+        else
+            echo -e "${GREEN}OK${NC}"
+        fi
+    fi
+
+    # 4. Check SEED_DATABASE default
+    if [ -f "$DOCKER_DIR/docker-compose.yml.example" ]; then
+        echo -n "  Checking SEED_DATABASE default... "
+        if grep -q 'SEED_DATABASE.*:-false' "$DOCKER_DIR/docker-compose.yml.example" 2>/dev/null; then
+            echo -e "${YELLOW}WARNING${NC}"
+            echo -e "    ${YELLOW}Warning: SEED_DATABASE defaults to false${NC}"
+            echo -e "    ${YELLOW}First-time users won't have an admin account created${NC}"
+            ((WARNINGS++))
+        elif grep -q 'SEED_DATABASE.*:-true\|SEED_DATABASE.*true' "$DOCKER_DIR/docker-compose.yml.example" 2>/dev/null; then
+            echo -e "${GREEN}OK${NC}"
+        else
+            echo -e "${YELLOW}NOT FOUND${NC}"
+            ((WARNINGS++))
+        fi
+    fi
+
+    # 5. Check for 'profiles:' that might block services from starting
+    if [ -f "$DOCKER_DIR/docker-compose.yml.example" ]; then
+        echo -n "  Checking for profile restrictions on core services... "
+
+        # Check if api or web services have profiles that would prevent them from starting
+        if grep -A20 "^\s*api:" "$DOCKER_DIR/docker-compose.yml.example" 2>/dev/null | grep -q "profiles:"; then
+            echo -e "${YELLOW}WARNING${NC}"
+            echo -e "    ${YELLOW}Warning: 'api' service has profiles - may not start by default${NC}"
+            ((WARNINGS++))
+        elif grep -A20 "^\s*web:" "$DOCKER_DIR/docker-compose.yml.example" 2>/dev/null | grep -q "profiles:"; then
+            echo -e "${YELLOW}WARNING${NC}"
+            echo -e "    ${YELLOW}Warning: 'web' service has profiles - may not start by default${NC}"
+            ((WARNINGS++))
+        else
+            echo -e "${GREEN}OK${NC}"
+        fi
+    fi
+
+    echo ""
+fi
+
+# Summary
+if [ $ERRORS -gt 0 ]; then
+    echo -e "${RED}Pre-commit check failed with $ERRORS error(s)${NC}"
+    echo ""
+    echo "Please fix the errors above before committing."
+    echo "To bypass this check (not recommended): git commit --no-verify"
+    exit 1
+fi
+
+if [ $WARNINGS -gt 0 ]; then
+    echo -e "${YELLOW}Pre-commit check passed with $WARNINGS warning(s)${NC}"
+else
+    echo -e "${GREEN}Pre-commit checks passed${NC}"
+fi
+
+exit 0
