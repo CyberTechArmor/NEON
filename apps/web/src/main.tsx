@@ -6,6 +6,18 @@ import { Toaster } from 'react-hot-toast';
 import App from './App';
 import './styles/globals.css';
 
+// Don't render React app for /api routes - let the server handle them
+// This check must happen BEFORE React renders to prevent Router from intercepting
+if (window.location.pathname.startsWith('/api')) {
+  // Clear the root element and stop - browser will show server response
+  const root = document.getElementById('root');
+  if (root) {
+    root.innerHTML = '';
+    root.style.display = 'none';
+  }
+  // Don't continue with React rendering
+} else {
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -46,3 +58,5 @@ if ('serviceWorker' in navigator) {
     });
   });
 }
+
+} // End of else block for non-/api routes

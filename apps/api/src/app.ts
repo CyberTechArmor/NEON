@@ -140,10 +140,79 @@ export function createApp(): Express {
     });
   });
 
-  // S3 Storage health check endpoint
+  // S3 Storage health check endpoint with detailed diagnostics
   app.get('/api/storage/health', async (_req: Request, res: Response) => {
     const healthCheck = await performHealthCheck();
     const status = getS3Status();
+    const config = getConfig();
+
+    // Test network reachability separately from S3 auth
+    let networkCheck: { reachable: boolean; latencyMs?: number; error?: string } = {
+      reachable: false,
+    };
+
+    try {
+      const endpointUrl = new URL(config.s3.endpoint);
+      const startTime = Date.now();
+
+      // Simple HTTP request to check if endpoint is reachable (without auth)
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch(config.s3.endpoint, {
+        method: 'GET',
+        signal: controller.signal,
+      }).catch((e) => ({ ok: false, status: 0, error: e }));
+
+      clearTimeout(timeout);
+      const latency = Date.now() - startTime;
+
+      // Any response (even 403 Forbidden) means the endpoint is reachable
+      networkCheck = {
+        reachable: true,
+        latencyMs: latency,
+      };
+    } catch (e: any) {
+      networkCheck = {
+        reachable: false,
+        error: e.message || 'Network check failed',
+      };
+    }
+
+    // Determine error type for diagnostics
+    let errorType: string | undefined;
+    let suggestion: string | undefined;
+    const errorMsg = healthCheck.error || status.lastError;
+
+    if (errorMsg) {
+      if (errorMsg.includes('ECONNREFUSED')) {
+        errorType = 'CONNECTION_REFUSED';
+        suggestion = 'S3/MinIO service may not be running. Check if the service is started on the configured endpoint.';
+      } else if (errorMsg.includes('ENOTFOUND') || errorMsg.includes('getaddrinfo')) {
+        errorType = 'DNS_ERROR';
+        suggestion = 'Cannot resolve S3 endpoint hostname. Check S3_ENDPOINT configuration.';
+      } else if (errorMsg.includes('timeout') || errorMsg.includes('Timeout')) {
+        errorType = 'TIMEOUT';
+        suggestion = 'S3 service is not responding. Check network connectivity and firewall rules.';
+      } else if (errorMsg.includes('AccessDenied') || errorMsg.includes('InvalidAccessKeyId') || errorMsg.includes('SignatureDoesNotMatch')) {
+        errorType = 'AUTH_ERROR';
+        suggestion = 'Invalid S3 credentials. Check S3_ACCESS_KEY and S3_SECRET_KEY environment variables.';
+      } else if (errorMsg.includes('NoSuchBucket')) {
+        errorType = 'BUCKET_NOT_FOUND';
+        suggestion = `Bucket "${status.config.bucket}" does not exist. Create it first using MinIO console or mc command.`;
+      } else {
+        errorType = 'UNKNOWN';
+        suggestion = 'Check server logs for detailed error information.';
+      }
+    }
+
+    // Check if credentials are configured (without exposing them)
+    const credentialStatus = {
+      accessKeyConfigured: !!config.s3.accessKey,
+      secretKeyConfigured: !!config.s3.secretKey,
+      accessKeyLength: config.s3.accessKey?.length || 0,
+      secretKeyLength: config.s3.secretKey?.length || 0,
+    };
 
     res.status(healthCheck.success ? 200 : 503).json({
       success: healthCheck.success,
@@ -151,12 +220,18 @@ export function createApp(): Express {
         connected: status.connected,
         latencyMs: healthCheck.latencyMs,
         lastHealthCheck: status.lastHealthCheck,
-        error: healthCheck.error || status.lastError,
+        error: errorMsg,
+        errorType,
+        suggestion,
+        network: networkCheck,
         config: {
           endpoint: status.config.endpoint,
+          publicEndpoint: config.s3.publicEndpoint || status.config.endpoint,
           bucket: status.config.bucket,
           region: status.config.region,
+          forcePathStyle: status.config.forcePathStyle,
         },
+        credentials: credentialStatus,
       },
       meta: {
         timestamp: new Date().toISOString(),
