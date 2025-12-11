@@ -8,22 +8,17 @@ set -e
 
 echo "[Entrypoint] Starting NEON API..."
 
-# Parse DATABASE_URL to extract connection details for pg_isready
-# DATABASE_URL format: postgresql://user:password@host:port/database?schema=public
-DB_HOST=$(echo "$DATABASE_URL" | sed -n 's/.*@\([^:]*\):.*/\1/p')
-DB_PORT=$(echo "$DATABASE_URL" | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')
-DB_USER=$(echo "$DATABASE_URL" | sed -n 's/.*:\/\/\([^:]*\):.*/\1/p')
-DB_NAME=$(echo "$DATABASE_URL" | sed -n 's/.*\/\([^?]*\).*/\1/p')
-
-echo "[Entrypoint] Database connection: host=$DB_HOST port=$DB_PORT user=$DB_USER db=$DB_NAME"
+# Run database migrations
+echo "[Entrypoint] Running database migrations..."
+cd /app/packages/database
 
 # Wait for database to be ready (with retries)
 MAX_RETRIES=30
 RETRY_COUNT=0
 
-# First wait for the database to be reachable using pg_isready
+# First wait for the database to be reachable
 echo "[Entrypoint] Waiting for database to be ready..."
-until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" > /dev/null 2>&1; do
+until echo "SELECT 1" | npx prisma db execute --stdin > /dev/null 2>&1; do
   RETRY_COUNT=$((RETRY_COUNT + 1))
   if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
     echo "[Entrypoint] Error: Database not reachable after $MAX_RETRIES attempts"
@@ -34,16 +29,14 @@ until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" > /dev/
 done
 
 echo "[Entrypoint] Database is reachable, running migrations..."
-cd /app/packages/database
 
 # Run migrations (show output for debugging)
-# Use globally installed prisma CLI
-if prisma migrate deploy; then
+if npx prisma migrate deploy; then
   echo "[Entrypoint] Database migrations completed successfully"
 else
   echo "[Entrypoint] Error: Database migration failed"
   echo "[Entrypoint] Attempting to push schema as fallback..."
-  if prisma db push --accept-data-loss; then
+  if npx prisma db push --accept-data-loss; then
     echo "[Entrypoint] Schema pushed successfully"
   else
     echo "[Entrypoint] Error: Schema push also failed"

@@ -71,16 +71,15 @@ RUN turbo run build --filter=@neon/api...
 # Ensure seed.js is compiled (may not be created if turbo cache is used)
 RUN cd packages/database && npm run build:seed
 
-# Prune development dependencies but keep prisma for migrations
-RUN npm prune --production && npm install -g prisma
+# Prune development dependencies
+RUN npm prune --production
 
 # -----------------------------------------------------------------------------
 # Production Stage
 # -----------------------------------------------------------------------------
 FROM node:20-alpine AS production
 
-# Install runtime dependencies including postgresql-client for pg_isready
-RUN apk add --no-cache libc6-compat dumb-init wget curl postgresql-client
+RUN apk add --no-cache libc6-compat dumb-init wget curl
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs

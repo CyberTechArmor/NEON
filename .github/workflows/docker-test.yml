@@ -82,12 +82,9 @@ jobs:
           cp docker/docker-compose.yml.example docker/docker-compose.yml
           echo "✓ Copied docker-compose.yml.example to docker-compose.yml"
 
-      - name: Build Docker images (production target)
+      - name: Build Docker images
         working-directory: docker
-        env:
-          BUILD_TARGET: production
         run: |
-          echo "Building with BUILD_TARGET=production for smoke tests..."
           docker compose build --no-cache
 
       - name: Start infrastructure services
@@ -108,8 +105,6 @@ jobs:
 
       - name: Start API service
         working-directory: docker
-        env:
-          BUILD_TARGET: production
         run: |
           docker compose up -d api
 
@@ -136,8 +131,6 @@ jobs:
 
       - name: Start Web service
         working-directory: docker
-        env:
-          BUILD_TARGET: production
         run: |
           docker compose up -d web
 
