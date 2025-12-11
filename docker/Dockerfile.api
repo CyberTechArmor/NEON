@@ -9,7 +9,7 @@
 # -----------------------------------------------------------------------------
 FROM node:20-alpine AS base
 
-RUN apk add --no-cache libc6-compat
+RUN apk add --no-cache libc6-compat wget curl
 WORKDIR /app
 
 # Install turbo globally
@@ -82,7 +82,7 @@ RUN npm prune --production
 # -----------------------------------------------------------------------------
 FROM node:20-alpine AS production
 
-RUN apk add --no-cache libc6-compat dumb-init
+RUN apk add --no-cache libc6-compat dumb-init wget curl
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs
