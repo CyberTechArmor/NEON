@@ -11,6 +11,12 @@ import { NotFoundError, ForbiddenError } from '@neon/shared';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { AuditService } from '../services/audit';
 import { hashPassword } from '../services/auth';
+import { getUploadSignedUrlForOrg, getSignedUrlForOrg, deleteFileForOrg, headObjectForOrg } from '../services/s3';
+import { v4 as uuidv4 } from 'uuid';
+
+// Allowed avatar MIME types
+const ALLOWED_AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const MAX_AVATAR_SIZE = 5 * 1024 * 1024; // 5MB
 
 const router = Router();
 
@@ -322,5 +328,289 @@ router.post(
     }
   }
 );
+
+// ==========================================================================
+// Avatar Upload
+// ==========================================================================
+
+/**
+ * POST /users/me/avatar/presign
+ * Get presigned URL for avatar upload
+ */
+router.post('/me/avatar/presign', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { contentType, filename } = req.body;
+
+    // Validate content type
+    if (!contentType || !ALLOWED_AVATAR_TYPES.includes(contentType)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_FILE_TYPE',
+          message: `Invalid file type. Allowed types: ${ALLOWED_AVATAR_TYPES.join(', ')}`,
+        },
+      });
+    }
+
+    // Generate unique key for avatar
+    const ext = contentType.split('/')[1] === 'jpeg' ? 'jpg' : contentType.split('/')[1];
+    const avatarKey = `avatars/${req.orgId}/${req.userId}/${uuidv4()}.${ext}`;
+
+    // Generate presigned upload URL
+    const uploadUrl = await getUploadSignedUrlForOrg(req.orgId!, avatarKey, contentType, 900); // 15 min expiry
+
+    if (!uploadUrl) {
+      return res.status(503).json({
+        success: false,
+        error: {
+          code: 'STORAGE_UNAVAILABLE',
+          message: 'File storage is temporarily unavailable',
+        },
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        uploadUrl,
+        key: avatarKey,
+        expiresIn: 900,
+        maxSize: MAX_AVATAR_SIZE,
+        allowedTypes: ALLOWED_AVATAR_TYPES,
+      },
+      meta: {
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /users/me/avatar/confirm
+ * Confirm avatar upload and update user profile
+ */
+router.post('/me/avatar/confirm', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { key } = req.body;
+
+    if (!key) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'MISSING_KEY',
+          message: 'Avatar key is required',
+        },
+      });
+    }
+
+    // Validate the key belongs to this user's avatar path
+    const expectedPrefix = `avatars/${req.orgId}/${req.userId}/`;
+    if (!key.startsWith(expectedPrefix)) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'INVALID_KEY',
+          message: 'Invalid avatar key',
+        },
+      });
+    }
+
+    // Verify the file exists in S3
+    const headResult = await headObjectForOrg(req.orgId!, key);
+    if (!headResult) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'FILE_NOT_FOUND',
+          message: 'Avatar file not found in storage',
+        },
+      });
+    }
+
+    // Validate MIME type from S3 metadata
+    const contentType = headResult.ContentType || '';
+    if (!ALLOWED_AVATAR_TYPES.includes(contentType)) {
+      // Delete the invalid file
+      await deleteFileForOrg(req.orgId!, key);
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_FILE_TYPE',
+          message: 'Invalid file type uploaded',
+        },
+      });
+    }
+
+    // Check file size
+    const fileSize = headResult.ContentLength || 0;
+    if (fileSize > MAX_AVATAR_SIZE) {
+      // Delete the oversized file
+      await deleteFileForOrg(req.orgId!, key);
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'FILE_TOO_LARGE',
+          message: `File size exceeds maximum of ${MAX_AVATAR_SIZE / 1024 / 1024}MB`,
+        },
+      });
+    }
+
+    // Get old avatar key to delete later
+    const currentUser = await prisma.user.findUnique({
+      where: { id: req.userId! },
+      select: { avatarUrl: true },
+    });
+
+    // Update user with new avatar key (store key, not URL)
+    const user = await prisma.user.update({
+      where: { id: req.userId! },
+      data: {
+        avatarUrl: key, // Store the key, generate signed URLs on demand
+      },
+      select: {
+        id: true,
+        avatarUrl: true,
+      },
+    });
+
+    // Delete old avatar if it exists and is different
+    if (currentUser?.avatarUrl && currentUser.avatarUrl !== key && currentUser.avatarUrl.startsWith('avatars/')) {
+      try {
+        await deleteFileForOrg(req.orgId!, currentUser.avatarUrl);
+      } catch (e) {
+        // Ignore errors deleting old avatar
+        console.warn('[Avatar] Failed to delete old avatar:', e);
+      }
+    }
+
+    // Generate signed URL for immediate display
+    const signedUrl = await getSignedUrlForOrg(req.orgId!, key, 3600);
+
+    await AuditService.log({
+      action: 'user.avatar_updated',
+      resourceType: 'user',
+      resourceId: req.userId!,
+      actorId: req.userId,
+      orgId: req.orgId,
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        avatarUrl: signedUrl,
+        avatarKey: key,
+      },
+      meta: {
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * DELETE /users/me/avatar
+ * Remove user avatar
+ */
+router.delete('/me/avatar', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId! },
+      select: { avatarUrl: true },
+    });
+
+    if (user?.avatarUrl && user.avatarUrl.startsWith('avatars/')) {
+      try {
+        await deleteFileForOrg(req.orgId!, user.avatarUrl);
+      } catch (e) {
+        // Ignore errors deleting avatar
+        console.warn('[Avatar] Failed to delete avatar:', e);
+      }
+    }
+
+    await prisma.user.update({
+      where: { id: req.userId! },
+      data: { avatarUrl: null },
+    });
+
+    await AuditService.log({
+      action: 'user.avatar_removed',
+      resourceType: 'user',
+      resourceId: req.userId!,
+      actorId: req.userId,
+      orgId: req.orgId,
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: { message: 'Avatar removed' },
+      meta: {
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /users/me/avatar-url
+ * Get fresh signed URL for current user's avatar
+ */
+router.get('/me/avatar-url', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId! },
+      select: { avatarUrl: true },
+    });
+
+    if (!user?.avatarUrl) {
+      return res.json({
+        success: true,
+        data: { avatarUrl: null },
+        meta: {
+          requestId: req.requestId,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
+    // If it's a key (stored locally), generate signed URL
+    if (user.avatarUrl.startsWith('avatars/')) {
+      const signedUrl = await getSignedUrlForOrg(req.orgId!, user.avatarUrl, 3600);
+      return res.json({
+        success: true,
+        data: {
+          avatarUrl: signedUrl,
+          expiresIn: 3600,
+        },
+        meta: {
+          requestId: req.requestId,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
+    // If it's already a URL (legacy), return as-is
+    res.json({
+      success: true,
+      data: { avatarUrl: user.avatarUrl },
+      meta: {
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 export { router as usersRouter };

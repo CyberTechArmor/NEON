@@ -807,3 +807,85 @@ export async function getUploadSignedUrlForOrg(
   const url = await getUploadSignedUrl(config.s3.bucketMedia, key, contentType, expiresIn);
   return { url, bucket: config.s3.bucketMedia };
 }
+
+/**
+ * Get file metadata (head object) using organization-specific S3 config
+ */
+export async function headObjectForOrg(
+  orgId: string,
+  key: string
+): Promise<{ ContentType?: string; ContentLength?: number; LastModified?: Date; ETag?: string } | null> {
+  try {
+    const orgClient = await getOrgS3Client(orgId);
+
+    if (orgClient) {
+      const response = await orgClient.client.send(
+        new HeadObjectCommand({
+          Bucket: orgClient.bucket,
+          Key: key,
+        })
+      );
+      return {
+        ContentType: response.ContentType,
+        ContentLength: response.ContentLength,
+        LastModified: response.LastModified,
+        ETag: response.ETag,
+      };
+    }
+
+    // Fall back to default config
+    if (!s3Client) return null;
+
+    const response = await s3Client.send(
+      new HeadObjectCommand({
+        Bucket: config.s3.bucketMedia,
+        Key: key,
+      })
+    );
+    return {
+      ContentType: response.ContentType,
+      ContentLength: response.ContentLength,
+      LastModified: response.LastModified,
+      ETag: response.ETag,
+    };
+  } catch (error: any) {
+    if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+      return null;
+    }
+    console.error('[S3] Head object error:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Delete a file using organization-specific S3 config
+ */
+export async function deleteFileForOrg(orgId: string, key: string): Promise<boolean> {
+  try {
+    const orgClient = await getOrgS3Client(orgId);
+
+    if (orgClient) {
+      await orgClient.client.send(
+        new DeleteObjectCommand({
+          Bucket: orgClient.bucket,
+          Key: key,
+        })
+      );
+      return true;
+    }
+
+    // Fall back to default config
+    if (!s3Client) return false;
+
+    await s3Client.send(
+      new DeleteObjectCommand({
+        Bucket: config.s3.bucketMedia,
+        Key: key,
+      })
+    );
+    return true;
+  } catch (error: any) {
+    console.error('[S3] Delete file error:', error.message);
+    return false;
+  }
+}
