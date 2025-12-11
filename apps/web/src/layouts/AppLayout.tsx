@@ -41,7 +41,9 @@ export default function AppLayout() {
   const {
     connect,
     disconnect,
+    forceReconnect,
     isConnected,
+    connectionStatus,
     updatePresence,
     notifications: socketNotifications,
     unreadNotificationCount,
@@ -51,6 +53,7 @@ export default function AppLayout() {
     activeTestAlert,
     acknowledgeTestAlert,
     lastActivityAt,
+    reconnectAttempts,
   } = useSocketStore();
   const { conversations } = useChatStore();
   const navigate = useNavigate();
@@ -131,15 +134,22 @@ export default function AppLayout() {
     };
   }, [navigate]);
 
-  // Calculate connection status for display
-  const getConnectionStatus = () => {
-    if (!isConnected) return 'disconnected';
-    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-    if (lastActivityAt && lastActivityAt < fiveMinutesAgo) return 'inactive';
-    return 'active';
+  // Get display text and color for connection status
+  const getConnectionDisplayInfo = () => {
+    if (connectionStatus === 'connected') {
+      return { text: 'Connected', color: 'bg-neon-success', pulse: false };
+    }
+    if (connectionStatus === 'connecting') {
+      return {
+        text: reconnectAttempts > 0 ? `Reconnecting (${reconnectAttempts})...` : 'Connecting...',
+        color: 'bg-neon-warning',
+        pulse: true
+      };
+    }
+    return { text: 'Disconnected', color: 'bg-neon-error', pulse: false };
   };
 
-  const connectionStatus = getConnectionStatus();
+  const connectionDisplay = getConnectionDisplayInfo();
 
   const handleLogout = async () => {
     await logout();
@@ -264,16 +274,17 @@ export default function AppLayout() {
 
             {/* Connection status */}
             <div className="mt-3 flex items-center gap-2 text-xs text-neon-text-muted">
-              <span className={`w-2 h-2 rounded-full ${
-                connectionStatus === 'active' ? 'bg-neon-success' :
-                connectionStatus === 'inactive' ? 'bg-neon-warning' :
-                'bg-neon-error'
-              }`} />
-              <span>{
-                connectionStatus === 'active' ? 'Active' :
-                connectionStatus === 'inactive' ? 'Inactive' :
-                'Disconnected'
-              }</span>
+              <span className={`w-2 h-2 rounded-full ${connectionDisplay.color} ${connectionDisplay.pulse ? 'animate-pulse' : ''}`} />
+              <span className="flex-1">{connectionDisplay.text}</span>
+              {connectionStatus === 'disconnected' && (
+                <button
+                  onClick={forceReconnect}
+                  className="text-neon-accent hover:text-neon-accent/80 hover:underline"
+                  title="Force reconnect"
+                >
+                  Retry
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -381,6 +392,31 @@ export default function AppLayout() {
             )}
           </div>
         </header>
+
+        {/* Connection banner when disconnected */}
+        {connectionStatus !== 'connected' && (
+          <div className={`flex-shrink-0 px-4 py-2 flex items-center justify-center gap-3 text-sm ${
+            connectionStatus === 'connecting' ? 'bg-neon-warning/20 text-neon-warning' : 'bg-neon-error/20 text-neon-error'
+          }`}>
+            {connectionStatus === 'connecting' ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{reconnectAttempts > 0 ? `Reconnecting (attempt ${reconnectAttempts})...` : 'Connecting...'}</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="w-4 h-4" />
+                <span>Connection lost. Messages may be delayed.</span>
+                <button
+                  onClick={forceReconnect}
+                  className="px-2 py-1 bg-neon-error text-white rounded text-xs font-medium hover:bg-neon-error/90"
+                >
+                  Reconnect
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Page content - add padding bottom on mobile for the nav bar */}
         <main className="flex-1 overflow-hidden pb-16 lg:pb-0">

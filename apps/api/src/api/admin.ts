@@ -5,7 +5,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma, checkDatabaseHealth } from '@neon/database';
 import { paginationSchema, createUserSchema, createRoleSchema, createDepartmentSchema } from '@neon/shared';
-import { NotFoundError } from '@neon/shared';
+import { NotFoundError, DEFAULT_FEATURES, type FeatureKey, type FeatureState, type OrganizationFeatures } from '@neon/shared';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { AuditService } from '../services/audit';
 import { checkRedisHealth } from '../services/redis';
@@ -1404,6 +1404,197 @@ router.patch('/organization/settings', requirePermission('org:manage_settings'),
   }
 });
 
+// ==========================================================================
+// Feature Toggles
+// ==========================================================================
+
+/**
+ * GET /admin/features
+ * Get organization feature toggles
+ */
+router.get('/features', requirePermission('org:view_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const org = await prisma.organization.findUnique({
+      where: { id: req.orgId! },
+      select: { settings: true },
+    });
+
+    const settings = org?.settings as { features?: Partial<OrganizationFeatures> } | null;
+    const features = { ...DEFAULT_FEATURES, ...settings?.features };
+
+    res.json({
+      success: true,
+      data: features,
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /admin/features
+ * Update organization feature toggles
+ */
+router.patch('/features', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const updates = req.body as Partial<Record<FeatureKey, FeatureState>>;
+
+    // Validate feature keys and states
+    const validStates: FeatureState[] = ['enabled', 'disabled', 'coming_soon'];
+    const validKeys = Object.keys(DEFAULT_FEATURES) as FeatureKey[];
+
+    for (const [key, state] of Object.entries(updates)) {
+      if (!validKeys.includes(key as FeatureKey)) {
+        return res.status(400).json({
+          success: false,
+          error: { message: `Invalid feature key: ${key}`, code: 'INVALID_FEATURE_KEY' },
+        });
+      }
+      if (!validStates.includes(state as FeatureState)) {
+        return res.status(400).json({
+          success: false,
+          error: { message: `Invalid state for ${key}: ${state}`, code: 'INVALID_FEATURE_STATE' },
+        });
+      }
+    }
+
+    // Get existing settings
+    const existingOrg = await prisma.organization.findUnique({
+      where: { id: req.orgId! },
+      select: { settings: true },
+    });
+
+    const existingSettings = existingOrg?.settings as { features?: Partial<OrganizationFeatures> } | null || {};
+    const existingFeatures = existingSettings.features || {};
+
+    // Merge features
+    const mergedFeatures = { ...existingFeatures, ...updates };
+    const mergedSettings = { ...existingSettings, features: mergedFeatures };
+
+    // Update organization
+    const org = await prisma.organization.update({
+      where: { id: req.orgId! },
+      data: { settings: mergedSettings },
+      select: { settings: true },
+    });
+
+    // Audit log
+    await AuditService.log({
+      action: 'organization.features_updated',
+      resourceType: 'organization',
+      resourceId: req.orgId!,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { features: updates },
+      ipAddress: req.ip,
+    });
+
+    // Broadcast feature toggle updates via WebSocket (import broadcastToOrg from socket)
+    // This will be handled by the socket module - emit event for each changed feature
+    const { broadcastToOrg } = await import('../socket');
+    for (const [feature, state] of Object.entries(updates)) {
+      broadcastToOrg(req.orgId!, 'feature:toggled', {
+        feature,
+        state,
+        orgId: req.orgId,
+        updatedBy: req.userId,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    const finalFeatures = { ...DEFAULT_FEATURES, ...(org.settings as any)?.features };
+
+    res.json({
+      success: true,
+      data: finalFeatures,
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /admin/features/:feature
+ * Toggle a single feature
+ */
+router.patch('/features/:feature', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const featureKey = req.params.feature as FeatureKey;
+    const { state } = req.body as { state: FeatureState };
+
+    // Validate feature key
+    const validKeys = Object.keys(DEFAULT_FEATURES) as FeatureKey[];
+    if (!validKeys.includes(featureKey)) {
+      return res.status(400).json({
+        success: false,
+        error: { message: `Invalid feature key: ${featureKey}`, code: 'INVALID_FEATURE_KEY' },
+      });
+    }
+
+    // Validate state
+    const validStates: FeatureState[] = ['enabled', 'disabled', 'coming_soon'];
+    if (!validStates.includes(state)) {
+      return res.status(400).json({
+        success: false,
+        error: { message: `Invalid state: ${state}`, code: 'INVALID_FEATURE_STATE' },
+      });
+    }
+
+    // Get existing settings
+    const existingOrg = await prisma.organization.findUnique({
+      where: { id: req.orgId! },
+      select: { settings: true },
+    });
+
+    const existingSettings = existingOrg?.settings as { features?: Partial<OrganizationFeatures> } | null || {};
+    const existingFeatures = existingSettings.features || {};
+
+    // Update feature
+    const mergedFeatures = { ...existingFeatures, [featureKey]: state };
+    const mergedSettings = { ...existingSettings, features: mergedFeatures };
+
+    // Update organization
+    const org = await prisma.organization.update({
+      where: { id: req.orgId! },
+      data: { settings: mergedSettings },
+      select: { settings: true },
+    });
+
+    // Audit log
+    await AuditService.log({
+      action: 'organization.feature_toggled',
+      resourceType: 'organization',
+      resourceId: req.orgId!,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { feature: featureKey, state },
+      ipAddress: req.ip,
+    });
+
+    // Broadcast via WebSocket
+    const { broadcastToOrg } = await import('../socket');
+    broadcastToOrg(req.orgId!, 'feature:toggled', {
+      feature: featureKey,
+      state,
+      orgId: req.orgId,
+      updatedBy: req.userId,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const finalFeatures = { ...DEFAULT_FEATURES, ...(org.settings as any)?.features };
+
+    res.json({
+      success: true,
+      data: { feature: featureKey, state, features: finalFeatures },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 /**
  * POST /admin/organization/test-storage
  * Test S3-compatible storage connection by actually connecting to the service
@@ -2607,6 +2798,333 @@ router.post('/developers/webhooks/:id/regenerate-secret', requirePermission('org
     });
   } catch (error) {
     return next(error);
+  }
+});
+
+// ==========================================================================
+// Storage Browser (Super Admin Only)
+// ==========================================================================
+
+// Helper to check if user is Super Admin
+async function isSuperAdmin(userId: string, orgId: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { role: true },
+  });
+  return user?.role?.name === 'Super Admin' || user?.role?.name === 'Super Administrator';
+}
+
+/**
+ * GET /admin/storage-browser/list
+ * List files in a directory (Super Admin only)
+ */
+router.get('/storage-browser/list', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Check if user is Super Admin
+    const isSuper = await isSuperAdmin(req.userId!, req.orgId!);
+    if (!isSuper) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Storage browser is only available to Super Administrators' },
+      });
+    }
+
+    const { prefix = '', continuationToken, maxKeys = 100 } = req.query;
+
+    // Get org S3 config
+    const orgConfig = await getOrgS3Config(req.orgId!);
+
+    if (!orgConfig?.enabled && !config.s3.endpoint) {
+      return res.status(503).json({
+        success: false,
+        error: { code: 'STORAGE_UNAVAILABLE', message: 'Storage is not configured' },
+      });
+    }
+
+    const s3Client = orgConfig?.enabled
+      ? new S3Client({
+          endpoint: orgConfig.endpoint,
+          region: orgConfig.region,
+          credentials: {
+            accessKeyId: orgConfig.accessKeyId,
+            secretAccessKey: orgConfig.secretAccessKey,
+          },
+          forcePathStyle: orgConfig.forcePathStyle,
+        })
+      : new S3Client({
+          endpoint: config.s3.endpoint,
+          region: config.s3.region,
+          credentials: {
+            accessKeyId: config.s3.accessKey,
+            secretAccessKey: config.s3.secretKey,
+          },
+          forcePathStyle: config.s3.forcePathStyle,
+        });
+
+    const bucket = orgConfig?.enabled ? orgConfig.bucket : config.s3.bucketMedia;
+
+    // List objects
+    const response = await s3Client.send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix as string,
+      Delimiter: '/',
+      MaxKeys: Math.min(Number(maxKeys), 1000),
+      ContinuationToken: continuationToken as string | undefined,
+    }));
+
+    // Get folder prefixes (directories)
+    const folders = (response.CommonPrefixes || []).map((cp) => ({
+      name: cp.Prefix?.replace(prefix as string, '').replace(/\/$/, '') || '',
+      path: cp.Prefix || '',
+      type: 'folder' as const,
+    }));
+
+    // Get files
+    const files = (response.Contents || [])
+      .filter((obj) => obj.Key !== prefix) // Filter out the directory itself
+      .map((obj) => ({
+        name: obj.Key?.replace(prefix as string, '') || '',
+        path: obj.Key || '',
+        type: 'file' as const,
+        size: obj.Size || 0,
+        lastModified: obj.LastModified?.toISOString(),
+        etag: obj.ETag?.replace(/"/g, ''),
+      }));
+
+    await AuditService.log({
+      action: 'storage.browse',
+      resourceType: 'storage',
+      resourceId: prefix as string || '/',
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { prefix, maxKeys },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        bucket,
+        prefix,
+        folders,
+        files,
+        isTruncated: response.IsTruncated,
+        nextContinuationToken: response.NextContinuationToken,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /admin/storage-browser/download-url
+ * Get presigned download URL for a file (Super Admin only)
+ */
+router.get('/storage-browser/download-url', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const isSuper = await isSuperAdmin(req.userId!, req.orgId!);
+    if (!isSuper) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Storage browser is only available to Super Administrators' },
+      });
+    }
+
+    const { key } = req.query;
+    if (!key || typeof key !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'MISSING_KEY', message: 'File key is required' },
+      });
+    }
+
+    // Prevent path traversal
+    if (key.includes('..')) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_KEY', message: 'Invalid file key' },
+      });
+    }
+
+    const { getSignedUrlForOrg } = await import('../services/s3');
+    const signedUrl = await getSignedUrlForOrg(req.orgId!, key, 3600);
+
+    await AuditService.log({
+      action: 'storage.download_url_generated',
+      resourceType: 'storage',
+      resourceId: key,
+      actorId: req.userId,
+      orgId: req.orgId,
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: { url: signedUrl, expiresIn: 3600 },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /admin/storage-browser/file-info
+ * Get file metadata (Super Admin only)
+ */
+router.get('/storage-browser/file-info', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const isSuper = await isSuperAdmin(req.userId!, req.orgId!);
+    if (!isSuper) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Storage browser is only available to Super Administrators' },
+      });
+    }
+
+    const { key } = req.query;
+    if (!key || typeof key !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'MISSING_KEY', message: 'File key is required' },
+      });
+    }
+
+    if (key.includes('..')) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_KEY', message: 'Invalid file key' },
+      });
+    }
+
+    const { headObjectForOrg } = await import('../services/s3');
+    const metadata = await headObjectForOrg(req.orgId!, key);
+
+    if (!metadata) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'File not found' },
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        key,
+        contentType: metadata.ContentType,
+        size: metadata.ContentLength,
+        lastModified: metadata.LastModified?.toISOString(),
+        etag: metadata.ETag?.replace(/"/g, ''),
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * DELETE /admin/storage-browser/file
+ * Delete a file (Super Admin only)
+ */
+router.delete('/storage-browser/file', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const isSuper = await isSuperAdmin(req.userId!, req.orgId!);
+    if (!isSuper) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Storage browser is only available to Super Administrators' },
+      });
+    }
+
+    const { key } = req.query;
+    if (!key || typeof key !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'MISSING_KEY', message: 'File key is required' },
+      });
+    }
+
+    if (key.includes('..')) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_KEY', message: 'Invalid file key' },
+      });
+    }
+
+    const { deleteFileForOrg } = await import('../services/s3');
+    await deleteFileForOrg(req.orgId!, key);
+
+    await AuditService.log({
+      action: 'storage.file_deleted',
+      resourceType: 'storage',
+      resourceId: key,
+      actorId: req.userId,
+      orgId: req.orgId,
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: { message: 'File deleted successfully' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /admin/storage-browser/stats
+ * Get storage statistics (Super Admin only)
+ */
+router.get('/storage-browser/stats', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const isSuper = await isSuperAdmin(req.userId!, req.orgId!);
+    if (!isSuper) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Storage browser is only available to Super Administrators' },
+      });
+    }
+
+    // Get storage usage from database
+    const [orgStats, userStats] = await Promise.all([
+      prisma.organization.findUnique({
+        where: { id: req.orgId! },
+        select: {
+          storageUsed: true,
+          storageLimit: true,
+        },
+      }),
+      prisma.user.groupBy({
+        by: ['id'],
+        where: { orgId: req.orgId! },
+        _sum: { storageUsed: true },
+      }),
+    ]);
+
+    // Get file count from database
+    const fileCount = await prisma.file.count({
+      where: { orgId: req.orgId! },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        totalUsed: Number(orgStats?.storageUsed || 0),
+        storageLimit: Number(orgStats?.storageLimit || 0),
+        fileCount,
+        usagePercentage: orgStats?.storageLimit
+          ? (Number(orgStats.storageUsed) / Number(orgStats.storageLimit)) * 100
+          : 0,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
   }
 });
 

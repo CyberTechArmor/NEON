@@ -19,6 +19,9 @@ const getWsUrl = (): string => {
   return 'http://localhost:3001';
 };
 
+// Connection status enum
+export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
+
 interface PresenceUser {
   odId: string;
   status: 'ONLINE' | 'AWAY' | 'DND' | 'OFFLINE' | 'online' | 'away' | 'busy' | 'offline';
@@ -44,19 +47,29 @@ interface TestAlert {
   acknowledged: boolean;
 }
 
+interface QueuedMessage {
+  type: 'message' | 'typing' | 'presence' | 'reaction';
+  data: any;
+  timestamp: number;
+}
+
 interface SocketState {
   socket: Socket | null;
   isConnected: boolean;
+  connectionStatus: ConnectionStatus;
   lastConnectedAt: number | null;
   lastActivityAt: number | null;
   presence: Record<string, PresenceUser>;
   notifications: Notification[];
   unreadNotificationCount: number;
   activeTestAlert: TestAlert | null;
+  reconnectAttempts: number;
+  messageQueue: QueuedMessage[];
 
   // Actions
   connect: () => void;
   disconnect: () => void;
+  forceReconnect: () => void;
   sendMessage: (conversationId: string, content: string, replyToId?: string) => void;
   editMessage: (messageId: string, content: string) => void;
   deleteMessage: (messageId: string) => void;
@@ -77,42 +90,195 @@ interface SocketState {
   acknowledgeTestAlert: () => void;
 }
 
+// Reconnection configuration
+const RECONNECT_CONFIG = {
+  initialDelay: 1000,      // Start at 1 second
+  maxDelay: 30000,         // Max 30 seconds
+  jitterFactor: 0.3,       // Add up to 30% random jitter
+  maxAttempts: Infinity,   // Keep trying indefinitely
+};
+
+// Heartbeat configuration
+const HEARTBEAT_CONFIG = {
+  interval: 25000,         // Send ping every 25 seconds
+  timeout: 60000,          // Consider connection stale after 60 seconds
+};
+
+// Rate limiting for reconnection
+const RATE_LIMIT = {
+  maxReconnectsPerMinute: 10,
+  windowMs: 60000,
+};
+
+// Track reconnection timestamps for rate limiting
+let reconnectTimestamps: number[] = [];
+let reconnectTimer: NodeJS.Timeout | null = null;
+let heartbeatTimer: NodeJS.Timeout | null = null;
+let staleConnectionTimer: NodeJS.Timeout | null = null;
+
+// Calculate delay with exponential backoff and jitter
+function calculateReconnectDelay(attempt: number): number {
+  const baseDelay = Math.min(
+    RECONNECT_CONFIG.initialDelay * Math.pow(2, attempt),
+    RECONNECT_CONFIG.maxDelay
+  );
+  const jitter = baseDelay * RECONNECT_CONFIG.jitterFactor * Math.random();
+  return Math.floor(baseDelay + jitter);
+}
+
+// Check if we're within rate limits for reconnection
+function canReconnect(): boolean {
+  const now = Date.now();
+  // Remove old timestamps outside the window
+  reconnectTimestamps = reconnectTimestamps.filter(
+    ts => now - ts < RATE_LIMIT.windowMs
+  );
+  return reconnectTimestamps.length < RATE_LIMIT.maxReconnectsPerMinute;
+}
+
+// Record a reconnection attempt
+function recordReconnectAttempt(): void {
+  reconnectTimestamps.push(Date.now());
+}
+
 export const useSocketStore = create<SocketState>((set, get) => ({
   socket: null,
   isConnected: false,
+  connectionStatus: 'disconnected',
   lastConnectedAt: null,
   lastActivityAt: null,
   presence: {},
   notifications: [],
   unreadNotificationCount: 0,
   activeTestAlert: null,
+  reconnectAttempts: 0,
+  messageQueue: [],
 
   connect: () => {
     const { accessToken } = useAuthStore.getState();
-    if (!accessToken || get().socket) return;
+    const currentSocket = get().socket;
+
+    // Don't connect if no token
+    if (!accessToken) {
+      console.log('[Socket] No access token, skipping connection');
+      return;
+    }
+
+    // Don't create new connection if one exists and is connected or connecting
+    if (currentSocket?.connected || currentSocket?.io?.engine?.readyState === 'opening') {
+      console.log('[Socket] Already connected or connecting');
+      return;
+    }
+
+    // Disconnect existing socket if any
+    if (currentSocket) {
+      currentSocket.disconnect();
+    }
+
+    // Clear any existing timers
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    if (staleConnectionTimer) {
+      clearTimeout(staleConnectionTimer);
+      staleConnectionTimer = null;
+    }
+
+    set({ connectionStatus: 'connecting' });
+    console.log('[Socket] Connecting to', getWsUrl());
 
     const socket = io(getWsUrl(), {
       auth: { token: accessToken },
       transports: ['websocket'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 10,
+      reconnection: false, // We handle reconnection ourselves
+      timeout: 20000,
+      forceNew: true,
     });
 
+    // Connection established
     socket.on('connect', () => {
-      console.log('[Socket] Connected');
+      console.log('[Socket] Connected successfully');
       const now = Date.now();
-      set({ isConnected: true, lastConnectedAt: now, lastActivityAt: now });
+      set({
+        isConnected: true,
+        connectionStatus: 'connected',
+        lastConnectedAt: now,
+        lastActivityAt: now,
+        reconnectAttempts: 0,
+      });
+
+      // Flush queued messages
+      const queue = get().messageQueue;
+      if (queue.length > 0) {
+        console.log(`[Socket] Flushing ${queue.length} queued messages`);
+        queue.forEach((msg) => {
+          try {
+            switch (msg.type) {
+              case 'message':
+                socket.emit('message:send', msg.data);
+                break;
+              case 'typing':
+                socket.emit(msg.data.isTyping ? 'typing:start' : 'typing:stop', msg.data);
+                break;
+              case 'presence':
+                socket.emit('presence:update', msg.data);
+                break;
+              case 'reaction':
+                socket.emit(msg.data.add ? 'message:react' : 'message:unreact', msg.data);
+                break;
+            }
+          } catch (e) {
+            console.error('[Socket] Failed to flush queued message:', e);
+          }
+        });
+        set({ messageQueue: [] });
+      }
+
+      // Start heartbeat
+      startHeartbeat(socket);
     });
 
+    // Disconnection handler
     socket.on('disconnect', (reason) => {
       console.log('[Socket] Disconnected:', reason);
-      set({ isConnected: false });
+      set({ isConnected: false, connectionStatus: 'disconnected' });
+      stopHeartbeat();
+
+      // Schedule reconnection
+      scheduleReconnect();
     });
 
+    // Connection error handler
     socket.on('connect_error', (error) => {
-      console.error('[Socket] Connection error:', error);
-      set({ isConnected: false });
+      console.error('[Socket] Connection error:', error.message);
+      set({ isConnected: false, connectionStatus: 'disconnected' });
+      stopHeartbeat();
+
+      // Check if it's an auth error
+      if (error.message.includes('Authentication') || error.message.includes('token')) {
+        console.log('[Socket] Auth error, refreshing token before reconnect');
+        // Attempt to refresh token before reconnecting
+        useAuthStore.getState().refreshToken?.()
+          .then(() => scheduleReconnect())
+          .catch(() => {
+            console.error('[Socket] Token refresh failed');
+            // Still try to reconnect, auth will fail and user will be logged out
+            scheduleReconnect();
+          });
+      } else {
+        scheduleReconnect();
+      }
+    });
+
+    // Pong response for heartbeat
+    socket.on('pong', () => {
+      set({ lastActivityAt: Date.now() });
+      resetStaleConnectionTimer(socket);
     });
 
     // Message events - use correct event names matching backend SocketEvents
@@ -310,21 +476,62 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       set({ activeTestAlert: null });
     });
 
+    // Feature toggle updates - real-time organization setting changes
+    socket.on('feature:toggled', (data: any) => {
+      console.log('[Socket] Feature toggle updated:', data);
+      // Dispatch custom event for components to listen
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('neon:feature-toggle', { detail: data }));
+      }
+    });
+
     set({ socket });
+
+    // Set up visibility change listener for reconnection
+    setupVisibilityListener();
+
+    // Set up online/offline listeners
+    setupNetworkListeners();
   },
 
   disconnect: () => {
     const { socket } = get();
     if (socket) {
       socket.disconnect();
-      set({ socket: null, isConnected: false });
+      set({ socket: null, isConnected: false, connectionStatus: 'disconnected' });
     }
+    stopHeartbeat();
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    // Remove event listeners
+    cleanupListeners();
+  },
+
+  forceReconnect: () => {
+    console.log('[Socket] Force reconnect requested');
+    const { socket } = get();
+    if (socket) {
+      socket.disconnect();
+    }
+    set({ reconnectAttempts: 0, connectionStatus: 'connecting' });
+    get().connect();
   },
 
   sendMessage: (conversationId: string, content: string, replyToId?: string) => {
-    const { socket } = get();
-    if (!socket) return;
-    socket.emit('message:send', { conversationId, content, replyToId });
+    const { socket, isConnected, messageQueue } = get();
+    const data = { conversationId, content, replyToId };
+
+    if (!socket || !isConnected) {
+      // Queue the message for when we reconnect
+      console.log('[Socket] Queuing message for later delivery');
+      set({
+        messageQueue: [...messageQueue, { type: 'message', data, timestamp: Date.now() }],
+      });
+      return;
+    }
+    socket.emit('message:send', data);
   },
 
   editMessage: (messageId: string, content: string) => {
@@ -340,14 +547,28 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   },
 
   addReaction: (messageId: string, emoji: string) => {
-    const { socket } = get();
-    if (!socket) return;
+    const { socket, isConnected, messageQueue } = get();
+    const data = { messageId, emoji, add: true };
+
+    if (!socket || !isConnected) {
+      set({
+        messageQueue: [...messageQueue, { type: 'reaction', data, timestamp: Date.now() }],
+      });
+      return;
+    }
     socket.emit('message:react', { messageId, emoji });
   },
 
   removeReaction: (messageId: string, emoji: string) => {
-    const { socket } = get();
-    if (!socket) return;
+    const { socket, isConnected, messageQueue } = get();
+    const data = { messageId, emoji, add: false };
+
+    if (!socket || !isConnected) {
+      set({
+        messageQueue: [...messageQueue, { type: 'reaction', data, timestamp: Date.now() }],
+      });
+      return;
+    }
     socket.emit('message:unreact', { messageId, emoji });
   },
 
@@ -385,11 +606,18 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   },
 
   updatePresence: (status: string, statusMessage?: string) => {
-    const { socket } = get();
-    if (!socket) return;
+    const { socket, isConnected, messageQueue } = get();
     // Send uppercase status for backend compatibility
     const normalizedStatus = status.toUpperCase() === 'BUSY' ? 'DND' : status.toUpperCase();
-    socket.emit('presence:update', { status: normalizedStatus, statusMessage });
+    const data = { status: normalizedStatus, statusMessage };
+
+    if (!socket || !isConnected) {
+      set({
+        messageQueue: [...messageQueue, { type: 'presence', data, timestamp: Date.now() }],
+      });
+      return;
+    }
+    socket.emit('presence:update', data);
   },
 
   updateActivity: () => {
@@ -459,3 +687,152 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     set({ activeTestAlert: null });
   },
 }));
+
+// Helper functions
+
+function startHeartbeat(socket: Socket): void {
+  stopHeartbeat();
+
+  heartbeatTimer = setInterval(() => {
+    if (socket.connected) {
+      socket.emit('ping');
+    }
+  }, HEARTBEAT_CONFIG.interval);
+
+  // Set up stale connection detection
+  resetStaleConnectionTimer(socket);
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  if (staleConnectionTimer) {
+    clearTimeout(staleConnectionTimer);
+    staleConnectionTimer = null;
+  }
+}
+
+function resetStaleConnectionTimer(socket: Socket): void {
+  if (staleConnectionTimer) {
+    clearTimeout(staleConnectionTimer);
+  }
+
+  staleConnectionTimer = setTimeout(() => {
+    console.log('[Socket] Connection appears stale, reconnecting...');
+    if (socket.connected) {
+      socket.disconnect();
+    }
+    scheduleReconnect();
+  }, HEARTBEAT_CONFIG.timeout);
+}
+
+function scheduleReconnect(): void {
+  // Check rate limit
+  if (!canReconnect()) {
+    console.log('[Socket] Rate limited, waiting before reconnect attempt');
+    reconnectTimer = setTimeout(() => {
+      scheduleReconnect();
+    }, RATE_LIMIT.windowMs / RATE_LIMIT.maxReconnectsPerMinute);
+    return;
+  }
+
+  // Clear existing timer
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+  }
+
+  const state = useSocketStore.getState();
+  const attempts = state.reconnectAttempts;
+  const delay = calculateReconnectDelay(attempts);
+
+  console.log(`[Socket] Scheduling reconnect attempt ${attempts + 1} in ${delay}ms`);
+
+  useSocketStore.setState({
+    reconnectAttempts: attempts + 1,
+    connectionStatus: 'connecting',
+  });
+
+  reconnectTimer = setTimeout(() => {
+    recordReconnectAttempt();
+
+    // Re-authenticate before reconnecting
+    const { accessToken } = useAuthStore.getState();
+    if (!accessToken) {
+      console.log('[Socket] No access token, skipping reconnect');
+      useSocketStore.setState({ connectionStatus: 'disconnected' });
+      return;
+    }
+
+    console.log('[Socket] Attempting reconnect...');
+    useSocketStore.getState().connect();
+  }, delay);
+}
+
+// Visibility change handler - reconnect when tab becomes visible
+let visibilityHandler: (() => void) | null = null;
+
+function setupVisibilityListener(): void {
+  if (visibilityHandler) return; // Already set up
+
+  visibilityHandler = () => {
+    if (document.visibilityState === 'visible') {
+      console.log('[Socket] Tab became visible, checking connection...');
+      const state = useSocketStore.getState();
+
+      if (!state.isConnected && state.connectionStatus !== 'connecting') {
+        console.log('[Socket] Not connected, attempting immediate reconnect');
+        // Reset reconnect attempts for faster initial reconnect
+        useSocketStore.setState({ reconnectAttempts: 0 });
+        state.connect();
+      } else if (state.socket?.connected) {
+        // Send a ping to verify connection is still alive
+        state.socket.emit('ping');
+      }
+    }
+  };
+
+  document.addEventListener('visibilitychange', visibilityHandler);
+}
+
+// Network status listeners
+let onlineHandler: (() => void) | null = null;
+let offlineHandler: (() => void) | null = null;
+
+function setupNetworkListeners(): void {
+  if (onlineHandler) return; // Already set up
+
+  onlineHandler = () => {
+    console.log('[Socket] Network came online');
+    const state = useSocketStore.getState();
+    if (!state.isConnected) {
+      // Reset reconnect attempts for faster reconnect
+      useSocketStore.setState({ reconnectAttempts: 0 });
+      state.connect();
+    }
+  };
+
+  offlineHandler = () => {
+    console.log('[Socket] Network went offline');
+    useSocketStore.setState({ connectionStatus: 'disconnected' });
+  };
+
+  window.addEventListener('online', onlineHandler);
+  window.addEventListener('offline', offlineHandler);
+}
+
+function cleanupListeners(): void {
+  if (visibilityHandler) {
+    document.removeEventListener('visibilitychange', visibilityHandler);
+    visibilityHandler = null;
+  }
+  if (onlineHandler) {
+    window.removeEventListener('online', onlineHandler);
+    onlineHandler = null;
+  }
+  if (offlineHandler) {
+    window.removeEventListener('offline', offlineHandler);
+    offlineHandler = null;
+  }
+}

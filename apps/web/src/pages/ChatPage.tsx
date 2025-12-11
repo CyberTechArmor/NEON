@@ -38,6 +38,7 @@ import { useChatStore } from '../stores/chat';
 import { useSocketStore } from '../stores/socket';
 import { useAuthStore } from '../stores/auth';
 import { conversationsApi, messagesApi, usersApi, filesApi, getErrorMessage } from '../lib/api';
+import { AttachmentRenderer } from '../components/AttachmentRenderer';
 
 interface UserForChat {
   id: string;
@@ -494,11 +495,18 @@ function MessageBubble({
           </div>
         )}
 
-        {/* Message bubble */}
+        {/* Attachments */}
+        {message.files && message.files.length > 0 && (
+          <AttachmentRenderer files={message.files} className="mb-1" />
+        )}
+
+        {/* Message bubble with content */}
         <div className="relative">
-          <div className={`message-bubble ${isOwn ? 'message-bubble-own' : 'message-bubble-other'}`}>
-            <p>{message.content}</p>
-          </div>
+          {message.content && (
+            <div className={`message-bubble ${isOwn ? 'message-bubble-own' : 'message-bubble-other'}`}>
+              <p className="whitespace-pre-wrap break-words">{message.content}</p>
+            </div>
+          )}
 
           {/* Actions menu */}
           <div

@@ -172,11 +172,30 @@ export const usersApi = {
 
   get: (id: string) => api.get<ApiResponse<unknown>>(`/users/${id}`),
 
-  updateProfile: (data: { name?: string; avatarUrl?: string }) =>
+  updateProfile: (data: { displayName?: string; avatarUrl?: string; timezone?: string; locale?: string }) =>
     api.patch<ApiResponse<unknown>>('/users/me', data),
 
   updateSettings: (settings: Record<string, unknown>) =>
     api.patch('/users/me/settings', { settings }),
+
+  // Avatar upload
+  getAvatarPresignedUrl: (contentType: string, filename?: string) =>
+    api.post<ApiResponse<{
+      uploadUrl: { url: string; bucket: string };
+      key: string;
+      expiresIn: number;
+      maxSize: number;
+      allowedTypes: string[];
+    }>>('/users/me/avatar/presign', { contentType, filename }),
+
+  confirmAvatarUpload: (key: string) =>
+    api.post<ApiResponse<{ avatarUrl: string; avatarKey: string }>>('/users/me/avatar/confirm', { key }),
+
+  deleteAvatar: () =>
+    api.delete<ApiResponse<{ message: string }>>('/users/me/avatar'),
+
+  getAvatarUrl: () =>
+    api.get<ApiResponse<{ avatarUrl: string | null; expiresIn?: number }>>('/users/me/avatar-url'),
 };
 
 export const meetingsApi = {
@@ -544,5 +563,60 @@ export const adminApi = {
       regenerateSecret: (id: string) =>
         api.post<ApiResponse<{ secret: string }>>(`/admin/developers/webhooks/${id}/regenerate-secret`),
     },
+  },
+
+  // Feature toggles
+  features: {
+    get: () => api.get<ApiResponse<Record<string, string>>>('/admin/features'),
+
+    update: (features: Record<string, string>) =>
+      api.patch<ApiResponse<Record<string, string>>>('/admin/features', features),
+
+    toggle: (feature: string, state: 'enabled' | 'disabled' | 'coming_soon') =>
+      api.patch<ApiResponse<{ feature: string; state: string; features: Record<string, string> }>>(`/admin/features/${feature}`, { state }),
+  },
+
+  // Storage browser (Super Admin only)
+  storageBrowser: {
+    list: (params?: { prefix?: string; continuationToken?: string; maxKeys?: number }) =>
+      api.get<ApiResponse<{
+        items: Array<{
+          key: string;
+          size: number;
+          lastModified: string;
+          isFolder: boolean;
+          contentType?: string;
+        }>;
+        prefix: string;
+        continuationToken?: string;
+        isTruncated: boolean;
+      }>>('/admin/storage-browser/list', { params }),
+
+    getDownloadUrl: (key: string) =>
+      api.get<ApiResponse<{ downloadUrl: string; expiresIn: number }>>('/admin/storage-browser/download-url', {
+        params: { key },
+      }),
+
+    getFileInfo: (key: string) =>
+      api.get<ApiResponse<{
+        key: string;
+        size: number;
+        lastModified: string;
+        contentType: string;
+        metadata: Record<string, string>;
+      }>>('/admin/storage-browser/file-info', { params: { key } }),
+
+    deleteFile: (key: string) =>
+      api.delete<ApiResponse<{ deleted: boolean }>>('/admin/storage-browser/file', {
+        params: { key },
+      }),
+
+    getStats: () =>
+      api.get<ApiResponse<{
+        totalObjects: number;
+        totalSize: number;
+        bucketName: string;
+        folders: Array<{ prefix: string; objectCount: number }>;
+      }>>('/admin/storage-browser/stats'),
   },
 };
