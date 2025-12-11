@@ -5,7 +5,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma, checkDatabaseHealth } from '@neon/database';
 import { paginationSchema, createUserSchema, createRoleSchema, createDepartmentSchema } from '@neon/shared';
-import { NotFoundError, DEFAULT_FEATURES, type FeatureKey, type FeatureState, type OrganizationFeatures } from '@neon/shared';
+import { NotFoundError, DEFAULT_FEATURES, type FeatureKey, type FeatureState, type OrganizationFeatures, SocketEvents } from '@neon/shared';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { AuditService } from '../services/audit';
 import { checkRedisHealth } from '../services/redis';
@@ -1494,7 +1494,7 @@ router.patch('/features', requirePermission('org:manage_settings'), async (req: 
     // This will be handled by the socket module - emit event for each changed feature
     const { broadcastToOrg } = await import('../socket/index.js');
     for (const [feature, state] of Object.entries(updates)) {
-      broadcastToOrg(req.orgId!, 'feature:toggled', {
+      broadcastToOrg(req.orgId!, SocketEvents.FEATURE_TOGGLED, {
         feature,
         state,
         orgId: req.orgId,
@@ -1511,7 +1511,7 @@ router.patch('/features', requirePermission('org:manage_settings'), async (req: 
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -1575,7 +1575,7 @@ router.patch('/features/:feature', requirePermission('org:manage_settings'), asy
 
     // Broadcast via WebSocket
     const { broadcastToOrg } = await import('../socket/index.js');
-    broadcastToOrg(req.orgId!, 'feature:toggled', {
+    broadcastToOrg(req.orgId!, SocketEvents.FEATURE_TOGGLED, {
       feature: featureKey,
       state,
       orgId: req.orgId,
@@ -1591,7 +1591,7 @@ router.patch('/features/:feature', requirePermission('org:manage_settings'), asy
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -2914,7 +2914,7 @@ router.get('/storage-browser/list', requirePermission('org:manage_settings'), as
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -2966,7 +2966,7 @@ router.get('/storage-browser/download-url', requirePermission('org:manage_settin
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -3021,7 +3021,7 @@ router.get('/storage-browser/file-info', requirePermission('org:manage_settings'
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -3072,7 +3072,7 @@ router.delete('/storage-browser/file', requirePermission('org:manage_settings'),
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -3124,7 +3124,7 @@ router.get('/storage-browser/stats', requirePermission('org:manage_settings'), a
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
