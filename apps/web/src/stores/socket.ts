@@ -263,7 +263,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       if (error.message.includes('Authentication') || error.message.includes('token')) {
         console.log('[Socket] Auth error, refreshing token before reconnect');
         // Attempt to refresh token before reconnecting
-        useAuthStore.getState().refreshToken?.()
+        useAuthStore.getState().refreshSession()
           .then(() => scheduleReconnect())
           .catch(() => {
             console.error('[Socket] Token refresh failed');

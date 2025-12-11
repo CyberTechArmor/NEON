@@ -84,7 +84,7 @@ function ProfileSettings() {
   } = useForm({
     resolver: zodResolver(profileSchema),
     defaultValues: {
-      name: user?.name || user?.displayName || '',
+      name: user?.name || '',
     },
   });
 
@@ -94,7 +94,7 @@ function ProfileSettings() {
       return response.data.data;
     },
     onSuccess: (data: any) => {
-      setUser({ ...user!, name: data.displayName || data.name, displayName: data.displayName });
+      setUser({ ...user!, name: data.displayName || data.name });
       toast.success('Profile updated');
     },
     onError: (error) => {
