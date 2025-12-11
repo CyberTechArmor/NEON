@@ -5,3 +5,4 @@ export { default as FederationBridges } from './FederationBridges';
 export { default as BulkImport } from './BulkImport';
 export { default as AdminSettings } from './AdminSettings';
 export { default as Developers } from './Developers';
+export { default as FeatureFlags } from './FeatureFlags';

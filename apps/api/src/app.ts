@@ -29,6 +29,7 @@ import { notificationsRouter } from './api/notifications';
 import { adminRouter } from './api/admin';
 import { webhooksRouter } from './api/webhooks';
 import { eventsRouter } from './api/events';
+import { featuresRouter } from './api/features';
 import { getS3Status, performHealthCheck } from './services/s3';
 
 const config = getConfig();
@@ -364,6 +365,9 @@ export function createApp(): Express {
 
   // Events API (for real-time event publishing via API key / webhooks)
   apiRouter.use('/events', eventsRouter);
+
+  // Feature Flags
+  apiRouter.use('/features', featuresRouter);
 
   // Mount API router at /api (not /api/v1 to match frontend expectations)
   app.use('/api', apiRouter);

@@ -14,6 +14,12 @@ import { hashPassword, generateSecureToken } from '../services/auth';
 import { S3Client, HeadBucketCommand, ListObjectsV2Command, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { clearOrgS3Cache, getOrgS3Config } from '../services/s3';
 import { getConfig } from '@neon/config';
+import {
+  getAllFeatureFlags,
+  setFeatureFlags,
+  getAvailableFeatureKeys,
+} from '../services/featureFlags';
+import { broadcastToOrg } from '../socket';
 
 const config = getConfig();
 
@@ -1742,6 +1748,76 @@ router.post('/organization/test-and-save-storage', requirePermission('org:manage
         meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
       });
     }
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ============================================================================
+// Feature Flags Management Routes
+// ============================================================================
+
+/**
+ * GET /admin/features
+ * Get all feature flags for the organization
+ */
+router.get('/features', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const flags = await getAllFeatureFlags(req.orgId!);
+    const availableFeatures = getAvailableFeatureKeys();
+
+    res.json({
+      success: true,
+      data: {
+        flags,
+        availableFeatures,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/features
+ * Update feature flags for the organization
+ */
+router.post('/features', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { flags } = req.body;
+
+    if (!flags || typeof flags !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Flags object is required' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    await setFeatureFlags(req.orgId!, flags);
+
+    // Log the action
+    await AuditService.log({
+      action: 'feature_flags.updated',
+      resourceType: 'organization',
+      resourceId: req.orgId!,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { flags: Object.keys(flags) },
+      ipAddress: req.ip,
+    });
+
+    // Broadcast the change to all connected clients in the org
+    broadcastToOrg(req.orgId!, 'feature_flags:updated' as any, { flags });
+
+    const updatedFlags = await getAllFeatureFlags(req.orgId!);
+
+    return res.json({
+      success: true,
+      data: { flags: updatedFlags },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
   } catch (error) {
     return next(error);
   }
