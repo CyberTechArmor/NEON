@@ -296,10 +296,17 @@ router.post('/presign', async (req: Request, res: Response, next: NextFunction) 
       });
     }
 
-    // Check if S3 storage is available, try to reconnect if not
-    if (!S3Service.isS3Available()) {
+    // Check if org has its own S3 storage configured first
+    // This takes priority over global/env S3 configuration
+    const orgS3Config = await S3Service.getOrgS3Config(req.orgId!);
+    const hasOrgStorage = !!orgS3Config;
+
+    console.log(`[files/presign] Org ${req.orgId} has custom storage: ${hasOrgStorage}`);
+
+    // Only check global S3 availability if org doesn't have its own storage
+    if (!hasOrgStorage && !S3Service.isS3Available()) {
       const s3Status = S3Service.getS3Status();
-      console.log('[files/presign] S3 unavailable, attempting reconnection...');
+      console.log('[files/presign] No org storage, checking global S3...');
       console.log('[files/presign] S3 Config:', {
         endpoint: s3Status.config.endpoint,
         bucket: s3Status.config.bucket,
@@ -310,7 +317,7 @@ router.post('/presign', async (req: Request, res: Response, next: NextFunction) 
       const healthCheck = await S3Service.performHealthCheck();
       if (!healthCheck.success) {
         const errorMsg = S3Service.getS3ConnectionError();
-        console.error(`[files/presign] S3 unavailable: ${errorMsg}`);
+        console.error(`[files/presign] Global S3 unavailable: ${errorMsg}`);
         return res.status(503).json({
           success: false,
           error: {
@@ -325,7 +332,7 @@ router.post('/presign', async (req: Request, res: Response, next: NextFunction) 
           meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
         });
       }
-      console.log(`[files/presign] S3 reconnection successful (${healthCheck.latencyMs}ms)`);
+      console.log(`[files/presign] Global S3 reconnection successful (${healthCheck.latencyMs}ms)`);
     }
 
     // Check storage limits if size is provided
@@ -359,25 +366,48 @@ router.post('/presign', async (req: Request, res: Response, next: NextFunction) 
     let url: string;
     let bucket: string;
 
-    if (operation === 'put') {
-      const result = await S3Service.getUploadSignedUrlForOrg(req.orgId!, key, contentType, 900); // 15 min expiry
-      url = result.url;
-      bucket = result.bucket;
-    } else if (operation === 'get') {
-      url = await S3Service.getSignedUrlForOrg(req.orgId!, key, 3600); // 1 hour expiry
-      bucket = config.s3.bucketMedia;
-    } else {
-      return res.status(400).json({
+    try {
+      if (operation === 'put') {
+        const result = await S3Service.getUploadSignedUrlForOrg(req.orgId!, key, contentType, 900); // 15 min expiry
+        url = result.url;
+        bucket = result.bucket;
+      } else if (operation === 'get') {
+        url = await S3Service.getSignedUrlForOrg(req.orgId!, key, 3600); // 1 hour expiry
+        bucket = orgS3Config?.bucket || config.s3.bucketMedia;
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_OPERATION',
+            message: 'operation must be "put" or "get"',
+          },
+          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        });
+      }
+    } catch (s3Error: any) {
+      console.error(`[files/presign] S3 presign failed: ${s3Error.message}`);
+      console.error(`[files/presign] Using org storage: ${hasOrgStorage}`);
+      if (orgS3Config) {
+        console.error(`[files/presign] Org S3 endpoint: ${orgS3Config.endpoint}`);
+        console.error(`[files/presign] Org S3 bucket: ${orgS3Config.bucket}`);
+      }
+      return res.status(503).json({
         success: false,
         error: {
-          code: 'INVALID_OPERATION',
-          message: 'operation must be "put" or "get"',
+          code: 'STORAGE_UNAVAILABLE',
+          message: 'File storage is temporarily unavailable. Please try again later.',
+          details: process.env.NODE_ENV === 'development' ? {
+            errorMessage: s3Error.message,
+            usingOrgStorage: hasOrgStorage,
+            endpoint: orgS3Config?.endpoint || S3Service.getS3Status().config.endpoint,
+            bucket: orgS3Config?.bucket || S3Service.getS3Status().config.bucket,
+          } : undefined,
         },
         meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
       });
     }
 
-    console.log(`[files/presign] Generated ${operation} URL for key: ${key}`);
+    console.log(`[files/presign] Generated ${operation} URL for key: ${key} (org storage: ${hasOrgStorage})`);
 
     return res.json({
       success: true,
