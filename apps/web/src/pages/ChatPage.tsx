@@ -1014,7 +1014,7 @@ export default function ChatPage() {
         className={`
           ${!showConversationList ? 'flex' : 'hidden'}
           lg:flex
-          flex-1 flex-col min-w-0 relative h-full
+          flex-1 flex-col min-w-0 relative h-full overflow-hidden
         `}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
