@@ -369,7 +369,7 @@ router.post('/me/avatar/presign', async (req: Request, res: Response, next: Next
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         uploadUrl,
@@ -498,7 +498,7 @@ router.post('/me/avatar/confirm', async (req: Request, res: Response, next: Next
       ipAddress: req.ip,
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         avatarUrl: signedUrl,
@@ -600,7 +600,7 @@ router.get('/me/avatar-url', async (req: Request, res: Response, next: NextFunct
     }
 
     // If it's already a URL (legacy), return as-is
-    res.json({
+    return res.json({
       success: true,
       data: { avatarUrl: user.avatarUrl },
       meta: {
