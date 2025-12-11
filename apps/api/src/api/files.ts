@@ -37,19 +37,68 @@ router.post(
         throw new Error('No file provided');
       }
 
-      // Check if S3 storage is available
+      // Check if S3 storage is available, try to reconnect if not
       if (!S3Service.isS3Available()) {
-        const errorMsg = S3Service.getS3ConnectionError();
-        console.error(`[files] S3 storage is not available: ${errorMsg}`);
-        return res.status(503).json({
-          success: false,
-          error: {
-            code: 'STORAGE_UNAVAILABLE',
-            message: 'File storage is temporarily unavailable. Please try again later.',
-            details: process.env.NODE_ENV === 'development' ? errorMsg : undefined,
-          },
-          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        const s3Status = S3Service.getS3Status();
+        console.log('[files] S3 unavailable, attempting reconnection...');
+        console.log('[files] S3 Config:', {
+          endpoint: s3Status.config.endpoint,
+          bucket: s3Status.config.bucket,
+          region: s3Status.config.region,
+          lastError: s3Status.lastError,
+          lastHealthCheck: s3Status.lastHealthCheck,
         });
+
+        // Try to reconnect before giving up
+        const healthCheck = await S3Service.performHealthCheck();
+        if (!healthCheck.success) {
+          const errorMsg = S3Service.getS3ConnectionError();
+
+          // Determine the type of error for better diagnostics
+          let errorType = 'UNKNOWN';
+          let suggestion = 'Check S3/MinIO service status';
+
+          if (errorMsg?.includes('ECONNREFUSED')) {
+            errorType = 'CONNECTION_REFUSED';
+            suggestion = 'S3/MinIO service may not be running. Check if the service is started.';
+          } else if (errorMsg?.includes('ENOTFOUND') || errorMsg?.includes('getaddrinfo')) {
+            errorType = 'DNS_ERROR';
+            suggestion = 'Cannot resolve S3 endpoint hostname. Check S3_ENDPOINT configuration.';
+          } else if (errorMsg?.includes('timeout') || errorMsg?.includes('Timeout')) {
+            errorType = 'TIMEOUT';
+            suggestion = 'S3 service is not responding. Check network connectivity and firewall rules.';
+          } else if (errorMsg?.includes('AccessDenied') || errorMsg?.includes('InvalidAccessKeyId')) {
+            errorType = 'AUTH_ERROR';
+            suggestion = 'Invalid S3 credentials. Check S3_ACCESS_KEY and S3_SECRET_KEY.';
+          } else if (errorMsg?.includes('NoSuchBucket')) {
+            errorType = 'BUCKET_NOT_FOUND';
+            suggestion = `Bucket "${s3Status.config.bucket}" does not exist. Create it first.`;
+          }
+
+          console.error(`[files] S3 storage is not available after reconnection attempt`);
+          console.error(`[files] Error Type: ${errorType}`);
+          console.error(`[files] Error Message: ${errorMsg}`);
+          console.error(`[files] Suggestion: ${suggestion}`);
+          console.error(`[files] Endpoint: ${s3Status.config.endpoint}`);
+          console.error(`[files] Bucket: ${s3Status.config.bucket}`);
+
+          return res.status(503).json({
+            success: false,
+            error: {
+              code: 'STORAGE_UNAVAILABLE',
+              message: 'File storage is temporarily unavailable. Please try again later.',
+              details: process.env.NODE_ENV === 'development' ? {
+                errorType,
+                errorMessage: errorMsg,
+                suggestion,
+                endpoint: s3Status.config.endpoint,
+                bucket: s3Status.config.bucket,
+              } : undefined,
+            },
+            meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+          });
+        }
+        console.log(`[files] S3 reconnection successful (latency: ${healthCheck.latencyMs}ms)`);
       }
 
       // Check user storage limit

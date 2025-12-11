@@ -169,6 +169,23 @@ export function createApp(): Express {
     res.redirect('/api/events/docs/html');
   });
 
+  // API base path - show API info or redirect to docs
+  app.get('/api', (_req: Request, res: Response) => {
+    res.json({
+      name: 'NEON API',
+      version: '0.1.0',
+      status: 'operational',
+      documentation: '/api/docs',
+      endpoints: {
+        health: '/api/health',
+        storage: '/api/storage/health',
+        docs: '/api/docs',
+        events: '/api/events',
+      },
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // System initialization status (public, no auth required)
   app.get('/api/status/init', async (_req: Request, res: Response) => {
     try {
