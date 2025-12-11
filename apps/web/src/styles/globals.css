@@ -256,7 +256,7 @@
   /* Message bubble */
   .message-bubble {
     @apply px-4 py-2.5 rounded-2xl;
-    max-width: min(70%, 480px);
+    max-width: min(75%, 600px);
     min-width: fit-content;
     /* Standard word breaking - only break at spaces/punctuation */
     word-break: normal;
@@ -274,7 +274,16 @@
   }
 
   .message-bubble-other {
-    @apply bg-neon-surface-hover text-white;
+    @apply bg-neon-surface-hover text-white mr-auto;
+  }
+
+  /* Message container spacing for better visual separation */
+  .message-container {
+    @apply mb-3;
+  }
+
+  .message-container:last-child {
+    @apply mb-0;
   }
 
   /* Status indicator with inactive state */

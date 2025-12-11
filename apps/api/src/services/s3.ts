@@ -13,6 +13,7 @@ import {
   HeadObjectCommand,
   HeadBucketCommand,
   ListObjectsV2Command,
+  CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl as awsGetSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getConfig } from '@neon/config';
@@ -30,6 +31,12 @@ let s3PublicClient: S3Client | null = null;
 // Connection state
 let isS3Connected = false;
 let lastConnectionError: string | null = null;
+let lastHealthCheckTime: Date | null = null;
+let healthCheckInterval: NodeJS.Timeout | null = null;
+
+// Heartbeat configuration
+const HEARTBEAT_INTERVAL_MS = 60000; // 60 seconds
+const HEALTH_CHECK_TIMEOUT_MS = 10000; // 10 seconds for health check
 
 // S3 configuration interface for organization storage settings
 export interface S3Config {
@@ -230,6 +237,188 @@ export function isS3Available(): boolean {
  */
 export function getS3ConnectionError(): string | null {
   return lastConnectionError;
+}
+
+/**
+ * Get the last health check time
+ */
+export function getLastHealthCheckTime(): Date | null {
+  return lastHealthCheckTime;
+}
+
+/**
+ * Get comprehensive S3 status information
+ */
+export function getS3Status(): {
+  connected: boolean;
+  lastError: string | null;
+  lastHealthCheck: Date | null;
+  config: {
+    endpoint: string;
+    bucket: string;
+    region: string;
+    forcePathStyle: boolean;
+  };
+} {
+  return {
+    connected: isS3Connected,
+    lastError: lastConnectionError,
+    lastHealthCheck: lastHealthCheckTime,
+    config: {
+      endpoint: config.s3.endpoint,
+      bucket: config.s3.bucketMedia,
+      region: config.s3.region,
+      forcePathStyle: config.s3.forcePathStyle,
+    },
+  };
+}
+
+/**
+ * Perform a health check on the S3 connection
+ * Uses a lightweight ListObjectsV2 request with max-keys=1
+ */
+export async function performHealthCheck(): Promise<{
+  success: boolean;
+  latencyMs: number;
+  error?: string;
+}> {
+  const startTime = Date.now();
+
+  try {
+    const client = getClient();
+
+    // Create a promise that times out
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Health check timeout')), HEALTH_CHECK_TIMEOUT_MS);
+    });
+
+    // Perform a lightweight list operation with max-keys=1
+    const checkPromise = client.send(
+      new ListObjectsV2Command({
+        Bucket: config.s3.bucketMedia,
+        MaxKeys: 1,
+      })
+    );
+
+    await Promise.race([checkPromise, timeoutPromise]);
+
+    const latencyMs = Date.now() - startTime;
+    lastHealthCheckTime = new Date();
+    isS3Connected = true;
+    lastConnectionError = null;
+
+    return {
+      success: true,
+      latencyMs,
+    };
+  } catch (error: any) {
+    const latencyMs = Date.now() - startTime;
+    isS3Connected = false;
+    lastConnectionError = error.message || 'Unknown error';
+    lastHealthCheckTime = new Date();
+
+    console.warn(`[S3] Health check failed: ${error.message}`);
+
+    return {
+      success: false,
+      latencyMs,
+      error: error.message,
+    };
+  }
+}
+
+/**
+ * Start the S3 heartbeat monitoring
+ * Periodically checks S3 connection health
+ */
+export function startHeartbeat(): void {
+  if (healthCheckInterval) {
+    console.log('[S3] Heartbeat already running');
+    return;
+  }
+
+  console.log(`[S3] Starting heartbeat with ${HEARTBEAT_INTERVAL_MS}ms interval`);
+
+  // Perform initial health check
+  performHealthCheck().then((result) => {
+    if (result.success) {
+      console.log(`[S3] Initial health check passed (${result.latencyMs}ms)`);
+    } else {
+      console.warn(`[S3] Initial health check failed: ${result.error}`);
+    }
+  });
+
+  // Set up periodic health checks
+  healthCheckInterval = setInterval(async () => {
+    const result = await performHealthCheck();
+    if (!result.success) {
+      console.warn(`[S3] Heartbeat failed: ${result.error}`);
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
+/**
+ * Stop the S3 heartbeat monitoring
+ */
+export function stopHeartbeat(): void {
+  if (healthCheckInterval) {
+    clearInterval(healthCheckInterval);
+    healthCheckInterval = null;
+    console.log('[S3] Heartbeat stopped');
+  }
+}
+
+/**
+ * Test connection to S3 with a specific configuration
+ * Used for testing user-provided S3 settings before saving
+ */
+export async function testConnection(testConfig: S3Config): Promise<{
+  success: boolean;
+  latencyMs: number;
+  error?: string;
+}> {
+  const startTime = Date.now();
+
+  try {
+    const testClient = new S3Client({
+      endpoint: testConfig.endpoint,
+      region: testConfig.region,
+      credentials: {
+        accessKeyId: testConfig.accessKeyId,
+        secretAccessKey: testConfig.secretAccessKey,
+      },
+      forcePathStyle: testConfig.forcePathStyle,
+    });
+
+    // Test with a lightweight operation
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Connection test timeout')), HEALTH_CHECK_TIMEOUT_MS);
+    });
+
+    const testPromise = testClient.send(
+      new ListObjectsV2Command({
+        Bucket: testConfig.bucket,
+        MaxKeys: 1,
+      })
+    );
+
+    await Promise.race([testPromise, timeoutPromise]);
+
+    const latencyMs = Date.now() - startTime;
+
+    return {
+      success: true,
+      latencyMs,
+    };
+  } catch (error: any) {
+    const latencyMs = Date.now() - startTime;
+
+    return {
+      success: false,
+      latencyMs,
+      error: error.message || 'Connection failed',
+    };
+  }
 }
 
 /**
@@ -484,7 +673,7 @@ export async function getUploadSignedUrl(
 }
 
 /**
- * Copy a file
+ * Copy a file using native S3 copy operation
  */
 export async function copyFile(
   sourceBucket: string,
@@ -492,9 +681,15 @@ export async function copyFile(
   destBucket: string,
   destKey: string
 ): Promise<void> {
-  const data = await downloadFile(sourceBucket, sourceKey);
-  const metadata = await getFileMetadata(sourceBucket, sourceKey);
-  await uploadFile(destBucket, destKey, data, metadata?.contentType);
+  const client = getClient();
+
+  await client.send(
+    new CopyObjectCommand({
+      Bucket: destBucket,
+      Key: destKey,
+      CopySource: `${sourceBucket}/${sourceKey}`,
+    })
+  );
 }
 
 // =============================================================================
