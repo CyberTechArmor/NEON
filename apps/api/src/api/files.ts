@@ -443,8 +443,8 @@ router.post('/confirm', async (req: Request, res: Response, next: NextFunction) 
       });
     }
 
-    // Verify the file exists in S3
-    const exists = await S3Service.fileExists(bucket || config.s3.bucketMedia, key);
+    // Verify the file exists in S3 (use org-specific storage if configured)
+    const exists = await S3Service.fileExistsForOrg(req.orgId!, bucket || config.s3.bucketMedia, key);
     if (!exists) {
       return res.status(404).json({
         success: false,

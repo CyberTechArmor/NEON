@@ -564,6 +564,32 @@ export async function fileExists(bucket: string, key: string): Promise<boolean> 
 }
 
 /**
+ * Check if a file exists using organization-specific S3 config if available
+ */
+export async function fileExistsForOrg(orgId: string, bucket: string, key: string): Promise<boolean> {
+  const orgClient = await getOrgS3Client(orgId);
+
+  // Use org-specific client if available
+  const client = orgClient ? orgClient.client : getClient();
+  const effectiveBucket = orgClient ? orgClient.bucket : bucket;
+
+  try {
+    await client.send(
+      new HeadObjectCommand({
+        Bucket: effectiveBucket,
+        Key: key,
+      })
+    );
+    return true;
+  } catch (error: unknown) {
+    if ((error as { name?: string }).name === 'NotFound') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
  * Get file metadata
  */
 export async function getFileMetadata(
