@@ -390,8 +390,9 @@ router.get('/:id/messages', async (req: Request, res: Response, next: NextFuncti
         },
         files: {
           include: {
-            file: { select: { id: true, name: true, mimeType: true, size: true } },
+            file: { select: { id: true, name: true, mimeType: true, size: true, bucket: true, key: true } },
           },
+          orderBy: { order: 'asc' },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -400,6 +401,35 @@ router.get('/:id/messages', async (req: Request, res: Response, next: NextFuncti
 
     const hasMore = messages.length > messageLimit;
     const data = hasMore ? messages.slice(0, -1) : messages;
+
+    // Generate presigned URLs for file attachments
+    const messagesWithAttachments = await Promise.all(
+      data.map(async (msg) => {
+        if (!msg.files || msg.files.length === 0) {
+          return { ...msg, attachments: [] };
+        }
+
+        const attachments = await Promise.all(
+          msg.files.map(async (mf) => {
+            let url: string;
+            try {
+              url = await getSignedUrlForOrg(req.orgId!, mf.file.key);
+            } catch {
+              url = await getSignedUrl(mf.file.bucket, mf.file.key);
+            }
+            return {
+              id: mf.file.id,
+              filename: mf.file.name,
+              mimeType: mf.file.mimeType,
+              size: Number(mf.file.size),
+              url,
+            };
+          })
+        );
+
+        return { ...msg, attachments };
+      })
+    );
 
     // Update last read timestamp
     await prisma.conversationParticipant.update({
@@ -412,7 +442,7 @@ router.get('/:id/messages', async (req: Request, res: Response, next: NextFuncti
 
     res.json({
       success: true,
-      data: data.reverse(), // Return in chronological order
+      data: messagesWithAttachments.reverse(), // Return in chronological order
       meta: {
         requestId: req.requestId,
         timestamp: new Date().toISOString(),
@@ -433,13 +463,16 @@ router.get('/:id/messages', async (req: Request, res: Response, next: NextFuncti
  */
 router.post('/:id/messages', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { content, replyToId, type = 'TEXT' } = req.body;
+    const { content, replyToId, type = 'TEXT', fileIds } = req.body;
+    const hasFiles = Array.isArray(fileIds) && fileIds.length > 0;
+    const messageContent = content?.trim() || '';
 
-    if (!content || typeof content !== 'string' || content.trim().length === 0) {
-      throw new ValidationError('Message content is required');
+    // Require either content or files
+    if (!messageContent && !hasFiles) {
+      throw new ValidationError('Message content or files are required');
     }
 
-    if (content.length > CHAT_LIMITS.MAX_MESSAGE_LENGTH) {
+    if (messageContent && messageContent.length > CHAT_LIMITS.MAX_MESSAGE_LENGTH) {
       throw new ValidationError(`Message cannot exceed ${CHAT_LIMITS.MAX_MESSAGE_LENGTH} characters`);
     }
 
@@ -478,14 +511,42 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
       throw new ForbiddenError('Access denied');
     }
 
-    // Create the message
+    // Verify file ownership if fileIds provided
+    let validFiles: { id: string; name: string; mimeType: string; size: bigint; bucket: string; key: string }[] = [];
+    if (hasFiles) {
+      validFiles = await prisma.file.findMany({
+        where: {
+          id: { in: fileIds },
+          orgId: req.orgId!,
+          uploadedBy: req.userId!,
+          deletedAt: null,
+        },
+        select: { id: true, name: true, mimeType: true, size: true, bucket: true, key: true },
+      });
+
+      if (validFiles.length !== fileIds.length) {
+        throw new ValidationError('One or more files are invalid or not accessible');
+      }
+    }
+
+    // Determine message type
+    const messageType = hasFiles && !messageContent ? 'FILE' : (type as 'TEXT' | 'FILE' | 'SYSTEM');
+
+    // Create the message with file attachments
     const message = await prisma.message.create({
       data: {
         conversationId: req.params.id!,
         senderId: req.userId!,
-        type: type as 'TEXT' | 'FILE' | 'SYSTEM',
-        content: content.trim(),
+        type: messageType,
+        content: messageContent,
         replyToId,
+        // Create MessageFile records
+        files: hasFiles ? {
+          create: validFiles.map((file, index) => ({
+            fileId: file.id,
+            order: index,
+          })),
+        } : undefined,
       },
       include: {
         sender: {
@@ -498,15 +559,47 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
             sender: { select: { id: true, displayName: true } },
           },
         },
+        files: {
+          include: {
+            file: { select: { id: true, name: true, mimeType: true, size: true, bucket: true, key: true } },
+          },
+          orderBy: { order: 'asc' },
+        },
       },
     });
 
+    // Generate presigned URLs for attachments
+    const attachments = await Promise.all(
+      (message.files || []).map(async (mf) => {
+        let url: string;
+        try {
+          url = await getSignedUrlForOrg(req.orgId!, mf.file.key);
+        } catch {
+          url = await getSignedUrl(mf.file.bucket, mf.file.key);
+        }
+        return {
+          id: mf.file.id,
+          filename: mf.file.name,
+          mimeType: mf.file.mimeType,
+          size: Number(mf.file.size),
+          url,
+        };
+      })
+    );
+
+    // Create response with attachments
+    const messageResponse = {
+      ...message,
+      attachments,
+    };
+
     // Update conversation last message info
+    const preview = messageContent || (validFiles.length > 0 ? `Sent ${validFiles.length} file(s)` : '');
     await prisma.conversation.update({
       where: { id: req.params.id },
       data: {
         lastMessageAt: message.createdAt,
-        lastMessagePreview: content.trim().substring(0, 100),
+        lastMessagePreview: preview.substring(0, 100),
       },
     });
 
@@ -523,8 +616,8 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
 
     // Broadcast message to all conversation participants via Socket.IO for real-time delivery
     console.log(`[Conversations API] Broadcasting new message ${message.id} in conversation ${req.params.id}`);
-    await broadcastToConversationParticipants(req.params.id!, SocketEvents.MESSAGE_RECEIVED, message);
-    broadcastToConversation(req.params.id!, SocketEvents.MESSAGE_RECEIVED, message);
+    await broadcastToConversationParticipants(req.params.id!, SocketEvents.MESSAGE_RECEIVED, messageResponse);
+    broadcastToConversation(req.params.id!, SocketEvents.MESSAGE_RECEIVED, messageResponse);
     console.log(`[Conversations API] Broadcast complete for message ${message.id}`);
 
     // Publish event for webhooks
@@ -537,12 +630,13 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
         content: message.content,
         type: message.type,
         createdAt: message.createdAt,
+        attachments: attachments.length > 0 ? attachments : undefined,
       },
     });
 
     res.status(201).json({
       success: true,
-      data: message,
+      data: messageResponse,
       meta: {
         requestId: req.requestId,
         timestamp: new Date().toISOString(),

@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   Image,
   FileIcon,
+  FolderOpen,
 } from 'lucide-react';
 
 // Common emoji categories for the picker
@@ -40,6 +41,7 @@ import { useAuthStore } from '../stores/auth';
 import { conversationsApi, messagesApi, usersApi, filesApi, getErrorMessage } from '../lib/api';
 import { useFeatureFlags } from '../hooks/useFeatureFlags';
 import { AttachmentRenderer } from '../components/attachments';
+import { ChatFileBrowser } from '../components/chat';
 
 interface UserForChat {
   id: string;
@@ -626,6 +628,7 @@ export default function ChatPage() {
   const [editingMessage, setEditingMessage] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewChat, setShowNewChat] = useState(false);
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [emojiCategory, setEmojiCategory] = useState<keyof typeof EMOJI_CATEGORIES>('Smileys');
   const emojiPickerRef = useRef<HTMLDivElement>(null);
@@ -756,15 +759,16 @@ export default function ChatPage() {
   );
 
   // Upload files helper - uses pre-signed URL for direct browser-to-S3 upload
-  const uploadFiles = async (files: File[]): Promise<string[]> => {
-    const uploadedUrls: string[] = [];
+  // Returns array of { id, url, name } for each uploaded file
+  const uploadFiles = async (files: File[]): Promise<{ id: string; url: string; name: string }[]> => {
+    const uploadedFiles: { id: string; url: string; name: string }[] = [];
 
     for (const file of files) {
       try {
         // Use pre-signed URL method for direct upload to S3
         const result = await filesApi.uploadWithPresign(file);
-        if (result.url) {
-          uploadedUrls.push(result.url);
+        if (result.id) {
+          uploadedFiles.push({ id: result.id, url: result.url, name: result.name });
         }
       } catch (error: any) {
         console.error(`Failed to upload ${file.name}:`, error);
@@ -774,7 +778,7 @@ export default function ChatPage() {
       }
     }
 
-    return uploadedUrls;
+    return uploadedFiles;
   };
 
   // Get file preview URL
@@ -812,9 +816,9 @@ export default function ChatPage() {
 
   // Send message mutation
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ content, replyToId }: { content: string; replyToId?: string }) => {
+    mutationFn: async ({ content, replyToId, fileIds }: { content: string; replyToId?: string; fileIds?: string[] }) => {
       if (!conversationId) throw new Error('No conversation selected');
-      const response = await messagesApi.send(conversationId, { content, replyToId });
+      const response = await messagesApi.send(conversationId, { content, replyToId, fileIds });
       return response.data.data;
     },
     onSuccess: (message) => {
@@ -900,23 +904,14 @@ export default function ChatPage() {
       // TODO: Implement edit mutation
       setEditingMessage(null);
     } else {
-      let finalContent = content;
+      let fileIds: string[] = [];
 
       // Upload files first if any
       if (hasFiles) {
         setIsUploadingFiles(true);
         try {
-          const uploadedUrls = await uploadFiles(pendingFiles);
-
-          // Append file URLs to message content
-          if (uploadedUrls.length > 0) {
-            const fileLinks = uploadedUrls
-              .map((url) => `[Attachment](${url})`)
-              .join('\n');
-            finalContent = content
-              ? `${content}\n\n${fileLinks}`
-              : fileLinks;
-          }
+          const uploadedFiles = await uploadFiles(pendingFiles);
+          fileIds = uploadedFiles.map(f => f.id);
         } catch (error) {
           toast.error('Failed to upload some files');
         } finally {
@@ -925,10 +920,12 @@ export default function ChatPage() {
         }
       }
 
-      if (finalContent) {
+      // Send message with file IDs
+      if (content || fileIds.length > 0) {
         sendMessageMutation.mutate({
-          content: finalContent,
+          content: content || (fileIds.length > 0 ? '' : ''),
           replyToId: replyTo?.id,
+          fileIds: fileIds.length > 0 ? fileIds : undefined,
         });
       }
     }
@@ -1142,11 +1139,27 @@ export default function ChatPage() {
                     <Video className="w-5 h-5" />
                   </button>
                 )}
+                <button
+                  className="btn btn-icon btn-ghost"
+                  onClick={() => setShowFileBrowser(true)}
+                  title="Browse shared files"
+                >
+                  <FolderOpen className="w-5 h-5" />
+                </button>
                 <button className="btn btn-icon btn-ghost">
                   <Info className="w-5 h-5" />
                 </button>
               </div>
             </div>
+
+            {/* Chat File Browser Modal */}
+            {conversationId && (
+              <ChatFileBrowser
+                conversationId={conversationId}
+                isOpen={showFileBrowser}
+                onClose={() => setShowFileBrowser(false)}
+              />
+            )}
 
             {/* Messages - scrollable area (only this section scrolls) */}
             <div

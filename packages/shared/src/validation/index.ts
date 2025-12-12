@@ -126,6 +126,7 @@ const nullableUuidSchema = z.preprocess(
 export const updateUserSchema = z.object({
   displayName: displayNameSchema.optional(),
   username: usernameSchema.optional(),
+  avatarUrl: z.string().max(500).nullable().optional(),
   departmentId: nullableUuidSchema,
   roleId: nullableUuidSchema,
   timezone: timezoneSchema.optional(),
