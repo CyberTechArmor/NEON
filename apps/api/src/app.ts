@@ -30,6 +30,7 @@ import { adminRouter } from './api/admin';
 import { webhooksRouter } from './api/webhooks';
 import { eventsRouter } from './api/events';
 import { featuresRouter } from './api/features';
+import { sharesRouter } from './api/shares';
 import { getS3Status, performHealthCheck } from './services/s3';
 
 const config = getConfig();
@@ -368,6 +369,9 @@ export function createApp(): Express {
 
   // Feature Flags
   apiRouter.use('/features', featuresRouter);
+
+  // File Sharing (includes /files/:fileId/url, /files/:fileId/shares, /shares/:shareId, /s/:token)
+  apiRouter.use('/', sharesRouter);
 
   // Mount API router at /api (not /api/v1 to match frontend expectations)
   app.use('/api', apiRouter);
