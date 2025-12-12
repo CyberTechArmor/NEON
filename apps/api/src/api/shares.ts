@@ -617,7 +617,7 @@ router.get('/s/:token', optionalAuth, async (req: Request, res: Response, next: 
       },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -683,7 +683,7 @@ router.post('/s/:token/verify-password', async (req: Request, res: Response, nex
       },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
