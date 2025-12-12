@@ -403,42 +403,58 @@ router.get('/:id/messages', async (req: Request, res: Response, next: NextFuncti
     const data = hasMore ? messages.slice(0, -1) : messages;
 
     // Generate presigned URLs for file attachments
+    // IMPORTANT: We must exclude the raw `files` relation from the response because it contains
+    // BigInt values that can't be serialized to JSON. We replace it with the processed `attachments` array.
     const messagesWithAttachments = await Promise.all(
       data.map(async (msg) => {
-        if (!msg.files || msg.files.length === 0) {
-          return { ...msg, attachments: [] };
+        // Destructure to remove the files relation (which has BigInt size values)
+        const { files, ...messageWithoutFiles } = msg;
+
+        if (!files || files.length === 0) {
+          return { ...messageWithoutFiles, attachments: [] };
         }
 
         const attachments = await Promise.all(
-          msg.files.map(async (mf) => {
-            let url: string;
+          files.map(async (mf) => {
+            let url = '';
             try {
               url = await getSignedUrlForOrg(req.orgId!, mf.file.key);
-            } catch {
-              url = await getSignedUrl(mf.file.bucket, mf.file.key);
+            } catch (err1) {
+              try {
+                url = await getSignedUrl(mf.file.bucket, mf.file.key);
+              } catch (err2) {
+                console.error(`[Conversations] Failed to get presigned URL for file ${mf.file.id}:`, err2);
+                // Return empty URL instead of failing the entire request
+                url = '';
+              }
             }
             return {
               id: mf.file.id,
               filename: mf.file.name,
               mimeType: mf.file.mimeType,
-              size: Number(mf.file.size),
+              size: Number(mf.file.size), // Convert BigInt to Number for JSON serialization
               url,
             };
           })
         );
 
-        return { ...msg, attachments };
+        return { ...messageWithoutFiles, attachments };
       })
     );
 
-    // Update last read timestamp
-    await prisma.conversationParticipant.update({
-      where: { id: participant.id },
-      data: {
-        lastReadAt: new Date(),
-        lastReadMessageId: data[0]?.id,
-      },
-    });
+    // Update last read timestamp - don't fail if this errors
+    try {
+      await prisma.conversationParticipant.update({
+        where: { id: participant.id },
+        data: {
+          lastReadAt: new Date(),
+          lastReadMessageId: data[0]?.id,
+        },
+      });
+    } catch (updateError) {
+      console.error(`[Conversations] Failed to update lastReadAt:`, updateError);
+      // Don't fail - messages were fetched successfully
+    }
 
     res.json({
       success: true,
@@ -600,20 +616,27 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
     );
 
     // Create response with attachments
+    // IMPORTANT: Remove the raw `files` relation which contains BigInt values that can't be serialized
+    const { files: _files, ...messageWithoutFiles } = message;
     const messageResponse = {
-      ...message,
+      ...messageWithoutFiles,
       attachments,
     };
 
-    // Update conversation last message info
-    const preview = messageContent || (validFiles.length > 0 ? `Sent ${validFiles.length} file(s)` : '');
-    await prisma.conversation.update({
-      where: { id: req.params.id },
-      data: {
-        lastMessageAt: message.createdAt,
-        lastMessagePreview: preview.substring(0, 100),
-      },
-    });
+    // Update conversation last message info - don't fail if this errors
+    try {
+      const preview = messageContent || (validFiles.length > 0 ? `Sent ${validFiles.length} file(s)` : '');
+      await prisma.conversation.update({
+        where: { id: req.params.id },
+        data: {
+          lastMessageAt: message.createdAt,
+          lastMessagePreview: preview.substring(0, 100),
+        },
+      });
+    } catch (updateError) {
+      console.error(`[Conversations API] Failed to update conversation lastMessageAt:`, updateError);
+      // Don't fail - message was saved successfully
+    }
 
     // Log the message send for audit
     await AuditService.log({
@@ -626,25 +649,35 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
       ipAddress: req.ip,
     });
 
-    // Broadcast message to all conversation participants via Socket.IO for real-time delivery
-    // Using broadcastToConversationParticipants which handles both EventBus (cross-instance) and direct socket emission
-    console.log(`[Conversations API] Broadcasting new message ${message.id} in conversation ${req.params.id}`);
-    await broadcastToConversationParticipants(req.params.id!, SocketEvents.MESSAGE_RECEIVED, messageResponse);
-    console.log(`[Conversations API] Broadcast complete for message ${message.id}`);
+    // Broadcast and publish events - these are fire-and-forget and shouldn't fail the request
+    // The message is already saved, so these are just notifications
+    try {
+      console.log(`[Conversations API] Broadcasting new message ${message.id} in conversation ${req.params.id}`);
+      await broadcastToConversationParticipants(req.params.id!, SocketEvents.MESSAGE_RECEIVED, messageResponse);
+      console.log(`[Conversations API] Broadcast complete for message ${message.id}`);
+    } catch (broadcastError) {
+      console.error(`[Conversations API] Failed to broadcast message ${message.id}:`, broadcastError);
+      // Don't fail the request - message was saved successfully
+    }
 
     // Publish event for webhooks
-    await publishEvent('message:created', {
-      orgId: req.orgId,
-      conversationId: req.params.id,
-      message: {
-        id: message.id,
-        senderId: message.senderId,
-        content: message.content,
-        type: message.type,
-        createdAt: message.createdAt,
-        attachments: attachments.length > 0 ? attachments : undefined,
-      },
-    });
+    try {
+      await publishEvent('message:created', {
+        orgId: req.orgId,
+        conversationId: req.params.id,
+        message: {
+          id: message.id,
+          senderId: message.senderId,
+          content: message.content,
+          type: message.type,
+          createdAt: message.createdAt,
+          attachments: attachments.length > 0 ? attachments : undefined,
+        },
+      });
+    } catch (webhookError) {
+      console.error(`[Conversations API] Failed to publish webhook event for message ${message.id}:`, webhookError);
+      // Don't fail the request - message was saved successfully
+    }
 
     res.status(201).json({
       success: true,
