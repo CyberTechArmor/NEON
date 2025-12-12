@@ -403,14 +403,19 @@ router.get('/:id/messages', async (req: Request, res: Response, next: NextFuncti
     const data = hasMore ? messages.slice(0, -1) : messages;
 
     // Generate presigned URLs for file attachments
+    // IMPORTANT: We must exclude the raw `files` relation from the response because it contains
+    // BigInt values that can't be serialized to JSON. We replace it with the processed `attachments` array.
     const messagesWithAttachments = await Promise.all(
       data.map(async (msg) => {
-        if (!msg.files || msg.files.length === 0) {
-          return { ...msg, attachments: [] };
+        // Destructure to remove the files relation (which has BigInt size values)
+        const { files, ...messageWithoutFiles } = msg;
+
+        if (!files || files.length === 0) {
+          return { ...messageWithoutFiles, attachments: [] };
         }
 
         const attachments = await Promise.all(
-          msg.files.map(async (mf) => {
+          files.map(async (mf) => {
             let url = '';
             try {
               url = await getSignedUrlForOrg(req.orgId!, mf.file.key);
@@ -427,13 +432,13 @@ router.get('/:id/messages', async (req: Request, res: Response, next: NextFuncti
               id: mf.file.id,
               filename: mf.file.name,
               mimeType: mf.file.mimeType,
-              size: Number(mf.file.size),
+              size: Number(mf.file.size), // Convert BigInt to Number for JSON serialization
               url,
             };
           })
         );
 
-        return { ...msg, attachments };
+        return { ...messageWithoutFiles, attachments };
       })
     );
 
@@ -611,8 +616,10 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
     );
 
     // Create response with attachments
+    // IMPORTANT: Remove the raw `files` relation which contains BigInt values that can't be serialized
+    const { files: _files, ...messageWithoutFiles } = message;
     const messageResponse = {
-      ...message,
+      ...messageWithoutFiles,
       attachments,
     };
 
