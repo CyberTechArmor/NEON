@@ -16,6 +16,7 @@ import MeetingPage from './pages/MeetingPage';
 import MeetingsPage from './pages/MeetingsPage';
 import SettingsPage from './pages/SettingsPage';
 import AdminPage from './pages/AdminPage';
+import SharePage from './pages/SharePage';
 
 // System Pages
 import InitializingPage from './pages/InitializingPage';
@@ -124,6 +125,10 @@ export default function App() {
         <Route path="settings/*" element={<SettingsPage />} />
         <Route path="admin/*" element={<AdminPage />} />
       </Route>
+
+      {/* Public Share Routes (no auth required) */}
+      <Route path="/s/:token" element={<SharePage />} />
+      <Route path="/share/:token" element={<SharePage />} />
 
       {/* Fallback - /api routes are handled in main.tsx before React renders */}
       <Route path="*" element={<Navigate to="/" replace />} />

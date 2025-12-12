@@ -53,12 +53,14 @@ export function createApp(): Express {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'], // unsafe-inline needed for API docs
-          styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
-          imgSrc: ["'self'", 'data:', 'blob:'],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://unpkg.com'], // unsafe-inline/eval needed for API docs (swagger-ui)
+          styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com', 'https://fonts.googleapis.com'],
+          fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+          imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
           connectSrc: ["'self'", config.livekit.url],
           mediaSrc: ["'self'", 'blob:'],
           frameSrc: ["'none'"],
+          workerSrc: ["'self'", 'blob:'],
         },
       },
       crossOriginEmbedderPolicy: false, // Required for LiveKit

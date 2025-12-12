@@ -40,6 +40,9 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         // Import custom service worker code for notifications
         importScripts: ['sw-custom.js'],
+        // Don't intercept /api/* routes - let them go directly to the server
+        // This is important for /api/docs (swagger), /api/s/* (share links), etc.
+        navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

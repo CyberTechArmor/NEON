@@ -162,7 +162,8 @@ export async function authenticate(
 }
 
 /**
- * Optional authentication - doesn't fail if no token present
+ * Optional authentication - doesn't fail if no token present or token is invalid
+ * Useful for public endpoints that can optionally show user-specific content
  */
 export async function optionalAuth(
   req: Request,
@@ -175,7 +176,80 @@ export async function optionalAuth(
     return next();
   }
 
-  return authenticate(req, res, next);
+  // Try to authenticate, but don't fail if it doesn't work
+  try {
+    const payload = jwt.verify(token, config.auth.jwtSecret) as AccessTokenPayload;
+
+    // Only proceed if it's an access token
+    if (payload.type !== 'access') {
+      return next(); // Skip auth for non-access tokens (like refresh tokens)
+    }
+
+    // Fetch user from database
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: {
+        id: true,
+        orgId: true,
+        email: true,
+        username: true,
+        displayName: true,
+        avatarUrl: true,
+        status: true,
+        departmentId: true,
+        roleId: true,
+        mfaEnabled: true,
+        timezone: true,
+        locale: true,
+        settings: true,
+        department: { select: { name: true } },
+        role: { select: { name: true, permissions: true } },
+      },
+    });
+
+    if (user && user.status === 'ACTIVE') {
+      // Combine role permissions with user-specific permissions
+      const rolePermissions = user.role?.permissions ?? [];
+      const userSettings = user.settings as Record<string, unknown> | null;
+      const userPermissions = (userSettings?.permissions as string[]) || [];
+      let allPermissions = [...new Set([...rolePermissions, ...userPermissions])];
+
+      const roleName = user.role?.name?.toLowerCase();
+      const isSuperAdminByRole = roleName === 'super admin' || roleName === 'superadmin';
+      if (isSuperAdminByRole && !allPermissions.includes('super_admin')) {
+        allPermissions = [...allPermissions, 'super_admin'];
+      }
+
+      const resolvedAvatarUrl = await resolveAvatarUrl(user.avatarUrl, user.orgId);
+
+      req.user = {
+        id: user.id,
+        orgId: user.orgId,
+        email: user.email,
+        username: user.username,
+        displayName: user.displayName,
+        avatarUrl: resolvedAvatarUrl,
+        status: user.status,
+        departmentId: user.departmentId,
+        roleId: user.roleId,
+        departmentName: user.department?.name ?? null,
+        roleName: user.role?.name ?? null,
+        timezone: user.timezone,
+        locale: user.locale,
+        permissions: allPermissions,
+        mfaEnabled: user.mfaEnabled,
+      };
+
+      req.userId = user.id;
+      req.orgId = user.orgId;
+      req.token = token;
+    }
+  } catch {
+    // Silently ignore auth errors for optional auth
+    // This allows unauthenticated access to public endpoints
+  }
+
+  return next();
 }
 
 /**

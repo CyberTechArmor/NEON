@@ -307,28 +307,20 @@ export function createSocketServer(httpServer: HttpServer): Server {
 
 /**
  * Setup EventBus subscriptions to receive events and deliver to clients
+ * NOTE: Only use ONE subscription pattern to avoid duplicate message delivery
  */
 function setupEventBusSubscriptions(): void {
-  // Subscribe to all events and route to appropriate clients
+  // Subscribe to all events with a single handler to prevent duplicates
+  // The wildcard '*' subscription handles ALL events including message:*, notification, conversation:*, etc.
   subscribeToEvents('*', (event, payload, metadata) => {
     console.log(`[Socket] EventBus received: ${event}`);
     handleEventBusMessage(event, payload as Record<string, unknown>);
   });
 
-  // Subscribe to specific message events for better routing
-  subscribeToEvents('message:*', (event, payload, metadata) => {
-    handleEventBusMessage(event, payload as Record<string, unknown>);
-  });
+  // NOTE: Removed duplicate subscriptions for message:*, notification, conversation:*
+  // These were causing duplicate message delivery since '*' already catches them
 
-  subscribeToEvents('notification', (event, payload, metadata) => {
-    handleEventBusMessage(event, payload as Record<string, unknown>);
-  });
-
-  subscribeToEvents('conversation:*', (event, payload, metadata) => {
-    handleEventBusMessage(event, payload as Record<string, unknown>);
-  });
-
-  console.log('[Socket] EventBus subscriptions configured');
+  console.log('[Socket] EventBus subscriptions configured (single handler)');
 }
 
 /**
@@ -596,34 +588,18 @@ export async function broadcastToConversationParticipants(
     });
 
     const participantIds = participants.map((p: { userId: string }) => p.userId);
-    console.log(`[Socket] Found ${participantIds.length} participants:`, participantIds);
+    console.log(`[Socket] Found ${participantIds.length} participants for delivery`);
 
-    // Publish to EventBus with target user IDs for cross-instance delivery
+    // Publish to EventBus with target user IDs
+    // The EventBus subscription in setupEventBusSubscriptions will handle socket delivery
+    // This ensures single delivery path and prevents duplicate messages
     await publishEvent(event, {
       ...(data as Record<string, unknown>),
       conversationId,
       targetUserIds: participantIds,
     });
 
-    // Also emit directly to same-instance sockets for immediate delivery
-    let totalSocketsEmitted = 0;
-    for (const userId of participantIds) {
-      const socketIds = userSockets.get(userId);
-      if (socketIds && socketIds.size > 0) {
-        for (const socketId of socketIds) {
-          const socket = io?.sockets.sockets.get(socketId);
-          if (socket) {
-            socket.emit(event as any, data as any);
-            totalSocketsEmitted++;
-          } else {
-            socketIds.delete(socketId);
-            socketToUser.delete(socketId);
-          }
-        }
-      }
-    }
-
-    console.log(`[Socket] Emitted ${String(event)} to ${totalSocketsEmitted} sockets for ${participantIds.length} participants`);
+    console.log(`[Socket] Published ${String(event)} to EventBus for ${participantIds.length} participants`);
   } catch (error) {
     console.error(`[Socket] Error broadcasting to conversation participants:`, error);
   }
