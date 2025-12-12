@@ -411,11 +411,17 @@ router.get('/:id/messages', async (req: Request, res: Response, next: NextFuncti
 
         const attachments = await Promise.all(
           msg.files.map(async (mf) => {
-            let url: string;
+            let url = '';
             try {
               url = await getSignedUrlForOrg(req.orgId!, mf.file.key);
-            } catch {
-              url = await getSignedUrl(mf.file.bucket, mf.file.key);
+            } catch (err1) {
+              try {
+                url = await getSignedUrl(mf.file.bucket, mf.file.key);
+              } catch (err2) {
+                console.error(`[Conversations] Failed to get presigned URL for file ${mf.file.id}:`, err2);
+                // Return empty URL instead of failing the entire request
+                url = '';
+              }
             }
             return {
               id: mf.file.id,
@@ -431,14 +437,19 @@ router.get('/:id/messages', async (req: Request, res: Response, next: NextFuncti
       })
     );
 
-    // Update last read timestamp
-    await prisma.conversationParticipant.update({
-      where: { id: participant.id },
-      data: {
-        lastReadAt: new Date(),
-        lastReadMessageId: data[0]?.id,
-      },
-    });
+    // Update last read timestamp - don't fail if this errors
+    try {
+      await prisma.conversationParticipant.update({
+        where: { id: participant.id },
+        data: {
+          lastReadAt: new Date(),
+          lastReadMessageId: data[0]?.id,
+        },
+      });
+    } catch (updateError) {
+      console.error(`[Conversations] Failed to update lastReadAt:`, updateError);
+      // Don't fail - messages were fetched successfully
+    }
 
     res.json({
       success: true,
