@@ -278,8 +278,19 @@ export const filesApi = {
     };
   },
 
-  getDownloadUrl: (fileId: string) =>
-    api.get<ApiResponse<{ downloadUrl: string }>>(`/files/${fileId}/download-url`),
+  /**
+   * Get file info with fresh presigned URL
+   */
+  getFile: (fileId: string) =>
+    api.get<ApiResponse<{ id: string; name: string; mimeType: string; size: number; url: string; thumbnailUrl: string | null; createdAt: string }>>(`/files/${fileId}`),
+
+  /**
+   * Get just the download URL for a file (wraps getFile for convenience)
+   */
+  getDownloadUrl: async (fileId: string): Promise<{ data: { data: { downloadUrl: string } } }> => {
+    const response = await api.get<ApiResponse<{ id: string; name: string; mimeType: string; size: number; url: string; thumbnailUrl: string | null; createdAt: string }>>(`/files/${fileId}`);
+    return { data: { data: { downloadUrl: response.data.data.url } } };
+  },
 
   delete: (fileId: string) => api.delete(`/files/${fileId}`),
 
