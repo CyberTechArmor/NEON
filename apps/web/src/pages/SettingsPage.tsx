@@ -34,39 +34,7 @@ import {
   playTestAlertSound,
 } from '../stores/notifications';
 import { usersApi, authApi, filesApi, getErrorMessage, api } from '../lib/api';
-
-// Toggle switch component for better visibility
-function Toggle({
-  checked,
-  onChange,
-  disabled = false,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`toggle-switch ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-    >
-      <span
-        className={`toggle-switch-track ${
-          checked ? 'toggle-switch-track-on' : 'toggle-switch-track-off'
-        }`}
-      />
-      <span
-        className={`toggle-switch-thumb ${
-          checked ? 'toggle-switch-thumb-on' : 'toggle-switch-thumb-off'
-        }`}
-      />
-    </button>
-  );
-}
+import { Toggle } from '../components/ui/Toggle';
 
 // Profile settings
 function ProfileSettings() {
@@ -136,11 +104,16 @@ function ProfileSettings() {
       });
 
       const result = await filesApi.uploadWithPresign(avatarFile);
-      const fileUrl = result.url;
 
-      // Update profile with new avatar URL
-      await usersApi.updateProfile({ avatarUrl: fileUrl });
-      setUser({ ...user!, avatarUrl: fileUrl });
+      // Store the file ID reference (not the presigned URL which expires)
+      // Backend will resolve this to a fresh presigned URL when fetching user data
+      const fileReference = `file:${result.id}`;
+
+      // Update profile with file reference
+      await usersApi.updateProfile({ avatarUrl: fileReference });
+
+      // Use the presigned URL for immediate display (will be refreshed on next page load)
+      setUser({ ...user!, avatarUrl: result.url });
       toast.success('Avatar updated');
     } catch (error) {
       toast.error(getErrorMessage(error));

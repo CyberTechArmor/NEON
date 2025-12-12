@@ -9,6 +9,7 @@ import jwt from 'jsonwebtoken';
 import { getConfig } from '@neon/config';
 import { prisma } from '@neon/database';
 import { UnauthorizedError, ForbiddenError, type AccessTokenPayload, type AuthUser } from '@neon/shared';
+import { resolveAvatarUrl } from '../services/auth';
 
 const config = getConfig();
 
@@ -128,6 +129,9 @@ export async function authenticate(
       allPermissions = [...allPermissions, 'super_admin'];
     }
 
+    // Resolve avatar URL to fresh presigned URL
+    const resolvedAvatarUrl = await resolveAvatarUrl(user.avatarUrl, user.orgId);
+
     // Attach user to request
     req.user = {
       id: user.id,
@@ -135,7 +139,7 @@ export async function authenticate(
       email: user.email,
       username: user.username,
       displayName: user.displayName,
-      avatarUrl: user.avatarUrl,
+      avatarUrl: resolvedAvatarUrl,
       status: user.status,
       departmentId: user.departmentId,
       roleId: user.roleId,
