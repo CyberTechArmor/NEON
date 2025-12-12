@@ -9,7 +9,7 @@ import { authenticate } from '../middleware/auth';
 import { canCommunicate, canFreeze } from '../services/permissions';
 import { AuditService } from '../services/audit';
 import { publishEvent } from '../services/eventbus';
-import { S3Service } from '../services/s3';
+import { getSignedUrlForOrg, getSignedUrl } from '../services/s3';
 import { broadcastToConversation, broadcastToConversationParticipants } from '../socket';
 import { SocketEvents } from '@neon/shared';
 import { CHAT_LIMITS } from '@neon/shared';
@@ -699,14 +699,14 @@ router.get('/:id/files', async (req: Request, res: Response, next: NextFunction)
         let thumbnailUrl: string | null = null;
 
         try {
-          url = await S3Service.getSignedUrlForOrg(req.orgId!, mf.file.key);
+          url = await getSignedUrlForOrg(req.orgId!, mf.file.key);
           if (mf.file.thumbnailKey) {
-            thumbnailUrl = await S3Service.getSignedUrlForOrg(req.orgId!, mf.file.thumbnailKey);
+            thumbnailUrl = await getSignedUrlForOrg(req.orgId!, mf.file.thumbnailKey);
           }
         } catch {
           // Fallback to bucket-based URL
           try {
-            url = await S3Service.getSignedUrl(mf.file.bucket, mf.file.key);
+            url = await getSignedUrl(mf.file.bucket, mf.file.key);
           } catch (e) {
             console.error(`Failed to get URL for file ${mf.file.id}:`, e);
           }

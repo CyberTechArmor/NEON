@@ -10,7 +10,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@neon/database';
 import { NotFoundError, ForbiddenError, ValidationError } from '@neon/shared';
 import { authenticate, optionalAuth } from '../middleware/auth';
-import { S3Service } from '../services/s3';
+import { getSignedUrlForOrg, getSignedUrl } from '../services/s3';
 import { z } from 'zod';
 
 const router = Router();
@@ -114,9 +114,9 @@ router.get('/files/:fileId/url', authenticate, async (req: Request, res: Respons
     // Generate fresh presigned URL
     let url: string;
     try {
-      url = await S3Service.getSignedUrlForOrg(req.orgId!, file.key);
+      url = await getSignedUrlForOrg(req.orgId!, file.key);
     } catch {
-      url = await S3Service.getSignedUrl(file.bucket, file.key);
+      url = await getSignedUrl(file.bucket, file.key);
     }
 
     res.json({
@@ -588,9 +588,9 @@ router.get('/s/:token', optionalAuth, async (req: Request, res: Response, next: 
     // Generate presigned URL
     let url: string;
     try {
-      url = await S3Service.getSignedUrlForOrg(share.file.orgId, share.file.key);
+      url = await getSignedUrlForOrg(share.file.orgId, share.file.key);
     } catch {
-      url = await S3Service.getSignedUrl(share.file.bucket, share.file.key);
+      url = await getSignedUrl(share.file.bucket, share.file.key);
     }
 
     res.json({
