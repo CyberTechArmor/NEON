@@ -615,9 +615,9 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
     });
 
     // Broadcast message to all conversation participants via Socket.IO for real-time delivery
+    // Using broadcastToConversationParticipants which handles both EventBus (cross-instance) and direct socket emission
     console.log(`[Conversations API] Broadcasting new message ${message.id} in conversation ${req.params.id}`);
     await broadcastToConversationParticipants(req.params.id!, SocketEvents.MESSAGE_RECEIVED, messageResponse);
-    broadcastToConversation(req.params.id!, SocketEvents.MESSAGE_RECEIVED, messageResponse);
     console.log(`[Conversations API] Broadcast complete for message ${message.id}`);
 
     // Publish event for webhooks
