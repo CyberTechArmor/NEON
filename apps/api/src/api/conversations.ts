@@ -525,6 +525,11 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
       });
 
       if (validFiles.length !== fileIds.length) {
+        // Find which files are missing for debugging
+        const foundIds = validFiles.map(f => f.id);
+        const missingIds = fileIds.filter((id: string) => !foundIds.includes(id));
+        console.error(`[Conversations] File validation failed. Missing files: ${missingIds.join(', ')}`);
+        console.error(`[Conversations] User: ${req.userId}, Org: ${req.orgId}, Requested: ${fileIds.length}, Found: ${validFiles.length}`);
         throw new ValidationError('One or more files are invalid or not accessible');
       }
     }
@@ -571,11 +576,18 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
     // Generate presigned URLs for attachments
     const attachments = await Promise.all(
       (message.files || []).map(async (mf) => {
-        let url: string;
+        let url = '';
         try {
           url = await getSignedUrlForOrg(req.orgId!, mf.file.key);
-        } catch {
-          url = await getSignedUrl(mf.file.bucket, mf.file.key);
+        } catch (err1) {
+          console.log(`[Conversations] getSignedUrlForOrg failed for ${mf.file.key}:`, err1);
+          try {
+            url = await getSignedUrl(mf.file.bucket, mf.file.key);
+          } catch (err2) {
+            console.error(`[Conversations] Both presigned URL methods failed for file ${mf.file.id}:`, err2);
+            // Return empty URL instead of failing the entire request
+            url = '';
+          }
         }
         return {
           id: mf.file.id,

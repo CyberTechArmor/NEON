@@ -386,15 +386,15 @@ export function ChatFileBrowser({ conversationId, isOpen, onClose }: ChatFileBro
               <button
                 key={type}
                 onClick={() => setActiveType(type)}
-                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors border ${
                   activeType === type
-                    ? 'bg-neon-accent text-white'
-                    : 'bg-neon-surface-hover text-neon-text-muted hover:text-white'
+                    ? 'bg-neon-accent border-neon-accent text-white shadow-md'
+                    : 'bg-neon-bg border-neon-border text-neon-text-muted hover:bg-neon-surface-hover hover:text-neon-text'
                 }`}
               >
                 {label}
                 {count !== undefined && count > 0 && (
-                  <span className="ml-1.5 opacity-75">({count})</span>
+                  <span className={`ml-1.5 ${activeType === type ? 'text-white/80' : 'text-neon-text-muted'}`}>({count})</span>
                 )}
               </button>
             ))}
