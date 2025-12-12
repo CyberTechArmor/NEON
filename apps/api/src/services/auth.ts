@@ -23,7 +23,7 @@ import {
 } from '@neon/shared';
 import { checkRateLimit, setCache, getCache, deleteCache } from './redis';
 import { AuditService } from './audit';
-import { S3Service } from './s3';
+import { getSignedUrlForOrg, getSignedUrl } from './s3';
 
 /**
  * Resolve avatar URL - if it's a file reference, generate fresh presigned URL
@@ -41,9 +41,9 @@ export async function resolveAvatarUrl(avatarUrl: string | null, orgId: string):
     });
     if (file) {
       try {
-        return await S3Service.getSignedUrlForOrg(orgId, file.key);
+        return await getSignedUrlForOrg(orgId, file.key);
       } catch {
-        return await S3Service.getSignedUrl(file.bucket, file.key);
+        return await getSignedUrl(file.bucket, file.key);
       }
     }
     return null;
@@ -52,7 +52,7 @@ export async function resolveAvatarUrl(avatarUrl: string | null, orgId: string):
   // If it looks like an S3 key (no protocol), generate presigned URL
   if (!avatarUrl.startsWith('http')) {
     try {
-      return await S3Service.getSignedUrlForOrg(orgId, avatarUrl);
+      return await getSignedUrlForOrg(orgId, avatarUrl);
     } catch {
       return null;
     }

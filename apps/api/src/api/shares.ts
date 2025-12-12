@@ -6,9 +6,9 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { randomBytes } from 'crypto';
-import bcrypt from 'bcryptjs';
+import argon2 from 'argon2';
 import { prisma } from '@neon/database';
-import { NotFoundError, ForbiddenError, ValidationError } from '@neon/shared';
+import { NotFoundError, ForbiddenError } from '@neon/shared';
 import { authenticate, optionalAuth } from '../middleware/auth';
 import { getSignedUrlForOrg, getSignedUrl } from '../services/s3';
 import { z } from 'zod';
@@ -52,14 +52,23 @@ function generateShareToken(): string {
  * Hash a password for share protection
  */
 async function hashSharePassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12);
+  return argon2.hash(password, {
+    type: argon2.argon2id,
+    memoryCost: 65536,
+    timeCost: 3,
+    parallelism: 4,
+  });
 }
 
 /**
  * Verify a share password using constant-time comparison
  */
 async function verifySharePassword(password: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(password, hash);
+  try {
+    return await argon2.verify(hash, password);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -175,7 +184,7 @@ router.post('/files/:fileId/shares', authenticate, async (req: Request, res: Res
     // Create the share
     const share = await prisma.fileShare.create({
       data: {
-        fileId,
+        fileId: fileId!,
         createdById: req.userId!,
         token,
         passwordHash,
@@ -593,7 +602,7 @@ router.get('/s/:token', optionalAuth, async (req: Request, res: Response, next: 
       url = await getSignedUrl(share.file.bucket, share.file.key);
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         url,
@@ -660,7 +669,7 @@ router.post('/s/:token/verify-password', async (req: Request, res: Response, nex
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         valid: true,

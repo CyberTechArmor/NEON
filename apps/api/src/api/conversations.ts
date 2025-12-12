@@ -652,17 +652,23 @@ router.get('/:id/files', async (req: Request, res: Response, next: NextFunction)
       fileWhereClause.name = { contains: search.trim(), mode: 'insensitive' };
     }
 
+    // Build message filter with cursor
+    const messageWhereClause: Record<string, unknown> = {
+      conversationId: id,
+      deletedAt: null,
+    };
+
+    if (cursor) {
+      messageWhereClause.createdAt = { lt: new Date(cursor as string) };
+    }
+
     // Query files from messages in this conversation
     const messageFiles = await prisma.messageFile.findMany({
       where: {
-        message: {
-          conversationId: id,
-          deletedAt: null,
-        },
+        message: messageWhereClause,
         file: fileWhereClause,
-        ...(cursor ? { createdAt: { lt: new Date(cursor as string) } } : {}),
       },
-      include: {
+      select: {
         file: {
           select: {
             id: true,
@@ -685,7 +691,7 @@ router.get('/:id/files', async (req: Request, res: Response, next: NextFunction)
           },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { message: { createdAt: 'desc' } },
       take: limitNum + 1,
     });
 
@@ -729,17 +735,12 @@ router.get('/:id/files', async (req: Request, res: Response, next: NextFunction)
       })
     );
 
-    // Get file type counts for the conversation
-    const typeCounts = await prisma.messageFile.groupBy({
-      by: [],
+    // Get total count
+    const totalCount = await prisma.messageFile.count({
       where: {
-        message: {
-          conversationId: id,
-          deletedAt: null,
-        },
+        message: { conversationId: id, deletedAt: null },
         file: { deletedAt: null, orgId: req.orgId! },
       },
-      _count: true,
     });
 
     // Calculate type-specific counts
@@ -771,6 +772,10 @@ router.get('/:id/files', async (req: Request, res: Response, next: NextFunction)
       },
     });
 
+    // Get cursor from last message's createdAt
+    const lastItem = data[data.length - 1];
+    const nextCursor = lastItem ? lastItem.message.createdAt.toISOString() : null;
+
     res.json({
       success: true,
       data: filesWithUrls,
@@ -779,10 +784,10 @@ router.get('/:id/files', async (req: Request, res: Response, next: NextFunction)
         timestamp: new Date().toISOString(),
         pagination: {
           hasMore,
-          cursor: data.length > 0 ? data[data.length - 1]!.createdAt.toISOString() : null,
+          cursor: nextCursor,
         },
         counts: {
-          total: typeCounts[0]?._count || 0,
+          total: totalCount,
           images: imageCount,
           videos: videoCount,
           audio: audioCount,
