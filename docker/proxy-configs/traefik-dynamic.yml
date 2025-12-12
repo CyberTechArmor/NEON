@@ -1,0 +1,84 @@
+# NEON Traefik Dynamic Configuration
+
+http:
+  routers:
+    # API Router
+    neon-api:
+      rule: "Host(`neon.example.com`) && PathPrefix(`/api`)"
+      service: neon-api
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - security-headers
+        - rate-limit
+
+    # WebSocket Router
+    neon-websocket:
+      rule: "Host(`neon.example.com`) && PathPrefix(`/socket.io`)"
+      service: neon-api
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+
+    # Web Client Router
+    neon-web:
+      rule: "Host(`neon.example.com`)"
+      service: neon-web
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - security-headers
+      priority: 1
+
+    # LiveKit Router (separate domain)
+    livekit:
+      rule: "Host(`livekit.example.com`)"
+      service: neon-livekit
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    neon-api:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:3001"
+        healthCheck:
+          path: /api/health
+          interval: 10s
+
+    neon-web:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:3000"
+
+    neon-livekit:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:7880"
+
+  middlewares:
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: strict-origin-when-cross-origin
+
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 50
+        period: 1s
+
+    strip-livekit-prefix:
+      stripPrefix:
+        prefixes:
+          - /livekit

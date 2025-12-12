@@ -1,0 +1,65 @@
+# NEON Caddyfile Template
+#
+# This is the default Caddy configuration for NEON.
+# Replace {$DOMAIN} and {$LIVEKIT_DOMAIN} with your actual domains before deployment.
+#
+# For automatic SSL certificates:
+#   1. Copy this file to /etc/caddy/Caddyfile (or mount in Docker)
+#   2. Replace domain placeholders
+#   3. Reload Caddy: systemctl reload caddy (or restart container)
+#
+# Caddy will automatically obtain and renew SSL certificates from Let's Encrypt.
+
+# Main NEON application
+{$DOMAIN} {
+    # API routes - MUST come before web fallback
+    # Routes all /api/* requests to the API server
+    handle /api/* {
+        reverse_proxy api:3001
+    }
+
+    # WebSocket (Socket.io) - for real-time communication
+    handle /socket.io/* {
+        reverse_proxy api:3001
+    }
+
+    # Web client (default fallback)
+    # All other requests go to the web frontend
+    handle {
+        reverse_proxy web:80
+    }
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        # Remove server identification
+        -Server
+    }
+
+    # Enable gzip compression
+    encode gzip
+
+    # Logging
+    log {
+        output file /var/log/caddy/neon-access.log
+        format json
+    }
+}
+
+# LiveKit server (if using separate domain)
+# Uncomment and configure if LIVEKIT_DOMAIN differs from DOMAIN
+# {$LIVEKIT_DOMAIN} {
+#     reverse_proxy livekit:7880
+#
+#     header {
+#         Strict-Transport-Security "max-age=31536000; includeSubDomains"
+#     }
+#
+#     log {
+#         output file /var/log/caddy/livekit-access.log
+#         format json
+#     }
+# }
