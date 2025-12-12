@@ -20,6 +20,7 @@ import {
   ArrowLeftRight,
 } from 'lucide-react';
 import { adminApi, getErrorMessage } from '../../lib/api';
+import { Toggle } from '../../components/ui/Toggle';
 
 interface S3Settings {
   enabled: boolean;
@@ -281,15 +282,11 @@ export function AdminSettings() {
                 Use S3-compatible storage instead of local filesystem
               </p>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={formData.enabled}
-                onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-neon-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-accent"></div>
-            </label>
+            <Toggle
+              checked={formData.enabled || false}
+              onChange={(checked) => setFormData({ ...formData, enabled: checked })}
+              aria-label="Enable External Storage"
+            />
           </div>
 
           {formData.enabled && (
@@ -423,15 +420,11 @@ export function AdminSettings() {
                     Use path-style URLs instead of virtual-hosted-style
                   </p>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.forcePathStyle}
-                    onChange={(e) => setFormData({ ...formData, forcePathStyle: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-neon-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-accent"></div>
-                </label>
+                <Toggle
+                  checked={formData.forcePathStyle || false}
+                  onChange={(checked) => setFormData({ ...formData, forcePathStyle: checked })}
+                  aria-label="Force Path Style"
+                />
               </div>
 
               {/* Test connection and auto-save */}
@@ -594,15 +587,11 @@ export function AdminSettings() {
                   Users can message people outside their department
                 </p>
               </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={messagingSettings.crossDepartmentMessaging}
-                  onChange={(e) => setMessagingSettings({ ...messagingSettings, crossDepartmentMessaging: e.target.checked })}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-neon-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-accent"></div>
-              </label>
+              <Toggle
+                checked={messagingSettings.crossDepartmentMessaging}
+                onChange={(checked) => setMessagingSettings({ ...messagingSettings, crossDepartmentMessaging: checked })}
+                aria-label="Allow Cross-Department Messaging"
+              />
             </div>
 
             {messagingSettings.crossDepartmentMessaging && (
@@ -690,15 +679,11 @@ export function AdminSettings() {
                       Cross-department messages require admin approval first
                     </p>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={messagingSettings.requireApprovalForCrossDept}
-                      onChange={(e) => setMessagingSettings({ ...messagingSettings, requireApprovalForCrossDept: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-neon-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-accent"></div>
-                  </label>
+                  <Toggle
+                    checked={messagingSettings.requireApprovalForCrossDept}
+                    onChange={(checked) => setMessagingSettings({ ...messagingSettings, requireApprovalForCrossDept: checked })}
+                    aria-label="Require Approval for Cross-Department Messages"
+                  />
                 </div>
               </>
             )}

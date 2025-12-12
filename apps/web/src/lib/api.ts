@@ -145,6 +145,25 @@ export const conversationsApi = {
 
   removeParticipant: (id: string, userId: string) =>
     api.delete(`/conversations/${id}/participants/${userId}`),
+
+  /**
+   * List all files shared in a conversation
+   */
+  listFiles: (id: string, params?: { cursor?: string; limit?: number; type?: 'image' | 'video' | 'audio' | 'document'; search?: string }) =>
+    api.get<ApiResponse<Array<{
+      id: string;
+      name: string;
+      mimeType: string;
+      size: number;
+      url: string | null;
+      thumbnailUrl: string | null;
+      uploadedAt: string;
+      message: {
+        id: string;
+        sentAt: string;
+        sender: { id: string; displayName: string; avatarUrl: string | null };
+      };
+    }>> & { meta: { counts: { total: number; images: number; videos: number; audio: number; documents: number } } }>(`/conversations/${id}/files`, { params }),
 };
 
 export const messagesApi = {
@@ -278,8 +297,19 @@ export const filesApi = {
     };
   },
 
-  getDownloadUrl: (fileId: string) =>
-    api.get<ApiResponse<{ downloadUrl: string }>>(`/files/${fileId}/download-url`),
+  /**
+   * Get file info with fresh presigned URL
+   */
+  getFile: (fileId: string) =>
+    api.get<ApiResponse<{ id: string; name: string; mimeType: string; size: number; url: string; thumbnailUrl: string | null; createdAt: string }>>(`/files/${fileId}`),
+
+  /**
+   * Get just the download URL for a file (wraps getFile for convenience)
+   */
+  getDownloadUrl: async (fileId: string): Promise<{ data: { data: { downloadUrl: string } } }> => {
+    const response = await api.get<ApiResponse<{ id: string; name: string; mimeType: string; size: number; url: string; thumbnailUrl: string | null; createdAt: string }>>(`/files/${fileId}`);
+    return { data: { data: { downloadUrl: response.data.data.url } } };
+  },
 
   delete: (fileId: string) => api.delete(`/files/${fileId}`),
 
@@ -288,6 +318,65 @@ export const filesApi = {
     api.post<ApiResponse<{ url: string; fileId: string }>>('/files/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+
+  /**
+   * Get a fresh presigned URL for internal file access
+   */
+  getPresignedUrl: (fileId: string) =>
+    api.get<ApiResponse<{ url: string; expiresIn: number }>>(`/files/${fileId}/url`),
+
+  /**
+   * Create a share for a file
+   */
+  createShare: (fileId: string, data: { password?: string; expiresAt?: string; maxOpens?: number; label?: string }) =>
+    api.post<ApiResponse<{ id: string; token: string; shareUrl: string; hasPassword: boolean; expiresAt: string | null; maxOpens: number | null; openCount: number; isActive: boolean; label: string | null; createdAt: string }>>(`/files/${fileId}/shares`, data),
+
+  /**
+   * List shares for a file
+   */
+  listShares: (fileId: string) =>
+    api.get<ApiResponse<Array<{ id: string; token: string; shareUrl: string; hasPassword: boolean; expiresAt: string | null; maxOpens: number | null; openCount: number; isActive: boolean; label: string | null; createdAt: string }>>>(`/files/${fileId}/shares`),
+};
+
+// File Share Management API
+export const sharesApi = {
+  /**
+   * Update a share
+   */
+  update: (shareId: string, data: { isActive?: boolean; expiresAt?: string | null; maxOpens?: number | null; label?: string | null }) =>
+    api.patch<ApiResponse<{ id: string; token: string; shareUrl: string; expiresAt: string | null; maxOpens: number | null; openCount: number; isActive: boolean; label: string | null; createdAt: string }>>(`/shares/${shareId}`, data),
+
+  /**
+   * Delete a share
+   */
+  delete: (shareId: string) => api.delete<ApiResponse<{ message: string }>>(`/shares/${shareId}`),
+
+  /**
+   * Get analytics for a share
+   */
+  getAnalytics: (shareId: string) =>
+    api.get<ApiResponse<{
+      share: { id: string; label: string | null; fileName: string; openCount: number; maxOpens: number | null; isActive: boolean; expiresAt: string | null; createdAt: string };
+      stats: { totalViews: number; totalDownloads: number; failedAttempts: number; uniqueCountries: number };
+      recentAccess: Array<{ id: string; accessedAt: string; ipAddress: string | null; actionType: string; geoCountry: string | null; geoCity: string | null }>;
+    }>>(`/shares/${shareId}/analytics`),
+
+  /**
+   * Access a shared file (public, no auth required)
+   */
+  access: (token: string, password?: string) => {
+    const headers: Record<string, string> = {};
+    if (password) {
+      headers['X-Share-Password'] = password;
+    }
+    return api.get<ApiResponse<{ url: string; fileName: string; fileSize: number; mimeType: string; expiresIn: number }> | { success: false; error: { code: string; message: string }; data?: { requiresPassword: boolean } }>(`/s/${token}`, { headers });
+  },
+
+  /**
+   * Verify password for a protected share
+   */
+  verifyPassword: (token: string, password: string) =>
+    api.post<ApiResponse<{ valid: boolean; fileName: string; fileSize: number; mimeType: string }>>(`/s/${token}/verify-password`, { password }),
 };
 
 export const notificationsApi = {

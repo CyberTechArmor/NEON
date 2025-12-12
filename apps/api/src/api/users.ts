@@ -10,7 +10,7 @@ import { createUserSchema, updateUserSchema, updatePresenceSchema, paginationSch
 import { NotFoundError, ForbiddenError } from '@neon/shared';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { AuditService } from '../services/audit';
-import { hashPassword } from '../services/auth';
+import { hashPassword, resolveAvatarUrl } from '../services/auth';
 
 const router = Router();
 
@@ -51,9 +51,17 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       prisma.user.count({ where }),
     ]);
 
+    // Resolve avatar URLs to fresh presigned URLs
+    const usersWithResolvedAvatars = await Promise.all(
+      users.map(async (user) => ({
+        ...user,
+        avatarUrl: await resolveAvatarUrl(user.avatarUrl, req.orgId!),
+      }))
+    );
+
     res.json({
       success: true,
-      data: users,
+      data: usersWithResolvedAvatars,
       meta: {
         requestId: req.requestId,
         timestamp: new Date().toISOString(),
@@ -106,9 +114,12 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       throw new NotFoundError('User', req.params.id);
     }
 
+    // Resolve avatar URL to fresh presigned URL
+    const resolvedAvatarUrl = await resolveAvatarUrl(user.avatarUrl, req.orgId!);
+
     res.json({
       success: true,
-      data: user,
+      data: { ...user, avatarUrl: resolvedAvatarUrl },
       meta: {
         requestId: req.requestId,
         timestamp: new Date().toISOString(),
@@ -232,9 +243,12 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
       userAgent: req.get('user-agent'),
     });
 
+    // Resolve avatar URL to fresh presigned URL
+    const resolvedAvatarUrl = await resolveAvatarUrl(user.avatarUrl, req.orgId!);
+
     res.json({
       success: true,
-      data: user,
+      data: { ...user, avatarUrl: resolvedAvatarUrl },
       meta: {
         requestId: req.requestId,
         timestamp: new Date().toISOString(),

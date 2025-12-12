@@ -8,6 +8,34 @@ export interface Attachment {
   url: string;
   size: number;
   mimeType: string;
+  // Optional: S3 object key for generating fresh presigned URLs
+  objectKey?: string;
+  // Optional: File ID for looking up file details
+  fileId?: string;
+}
+
+/**
+ * File metadata as stored in the database (from MessageFile join)
+ */
+export interface FileMetadata {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  bucket: string;
+  key: string; // S3 object key
+  thumbnailKey?: string;
+  createdAt: string;
+}
+
+/**
+ * Message file from API (includes file details via join)
+ */
+export interface MessageFile {
+  messageId: string;
+  fileId: string;
+  order: number;
+  file: FileMetadata;
 }
 
 export type AttachmentType = 'image' | 'video' | 'audio' | 'document';

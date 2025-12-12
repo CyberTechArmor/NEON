@@ -23,6 +23,44 @@ import {
 } from '@neon/shared';
 import { checkRateLimit, setCache, getCache, deleteCache } from './redis';
 import { AuditService } from './audit';
+import { getSignedUrlForOrg, getSignedUrl } from './s3';
+
+/**
+ * Resolve avatar URL - if it's a file reference, generate fresh presigned URL
+ * Format: "file:{fileId}" or S3 key pattern
+ */
+export async function resolveAvatarUrl(avatarUrl: string | null, orgId: string): Promise<string | null> {
+  if (!avatarUrl) return null;
+
+  // Check if it's a file ID reference (format: "file:{uuid}")
+  if (avatarUrl.startsWith('file:')) {
+    const fileId = avatarUrl.substring(5);
+    const file = await prisma.file.findFirst({
+      where: { id: fileId, deletedAt: null },
+      select: { key: true, bucket: true },
+    });
+    if (file) {
+      try {
+        return await getSignedUrlForOrg(orgId, file.key);
+      } catch {
+        return await getSignedUrl(file.bucket, file.key);
+      }
+    }
+    return null;
+  }
+
+  // If it looks like an S3 key (no protocol), generate presigned URL
+  if (!avatarUrl.startsWith('http')) {
+    try {
+      return await getSignedUrlForOrg(orgId, avatarUrl);
+    } catch {
+      return null;
+    }
+  }
+
+  // Return as-is for backwards compatibility (existing presigned URLs or external URLs)
+  return avatarUrl;
+}
 
 const config = getConfig();
 
@@ -378,13 +416,16 @@ export async function login(
   const expiresAt = new Date();
   expiresAt.setMinutes(expiresAt.getMinutes() + 15);
 
+  // Resolve avatar URL to fresh presigned URL
+  const resolvedAvatarUrl = await resolveAvatarUrl(user.avatarUrl, user.orgId);
+
   const authUser: AuthUser = {
     id: user.id,
     orgId: user.orgId,
     email: user.email,
     username: user.username,
     displayName: user.displayName,
-    avatarUrl: user.avatarUrl,
+    avatarUrl: resolvedAvatarUrl,
     status: user.status,
     departmentId: user.departmentId,
     roleId: user.roleId,
@@ -471,13 +512,16 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
   const expiresAt = new Date();
   expiresAt.setMinutes(expiresAt.getMinutes() + 15);
 
+  // Resolve avatar URL to fresh presigned URL
+  const resolvedAvatarUrl = await resolveAvatarUrl(user.avatarUrl, user.orgId);
+
   const authUser: AuthUser = {
     id: user.id,
     orgId: user.orgId,
     email: user.email,
     username: user.username,
     displayName: user.displayName,
-    avatarUrl: user.avatarUrl,
+    avatarUrl: resolvedAvatarUrl,
     status: user.status,
     departmentId: user.departmentId,
     roleId: user.roleId,

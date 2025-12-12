@@ -469,6 +469,7 @@ model User {
 
   // File relations
   uploadedFiles   File[]
+  fileShares      FileShare[]
 
   // Conversation requests (when approval is required)
   sentRequests    ConversationRequest[] @relation("Requester")
@@ -800,9 +801,62 @@ model File {
   uploader        User           @relation(fields: [uploadedBy], references: [id])
   messages        MessageFile[]
   meetingRecordings Recording[]
+  shares          FileShare[]
 
   @@index([orgId])
   @@index([uploadedBy])
+  @@schema("public")
+}
+
+/// External file sharing with access control
+model FileShare {
+  id              String         @id @default(uuid()) @db.Uuid
+  fileId          String         @db.Uuid
+  createdById     String         @db.Uuid
+
+  // Unique share token for external access
+  token           String         @unique @db.VarChar(64)
+
+  // Access control
+  passwordHash    String?        // bcrypt hash, null if no password
+  expiresAt       DateTime?      // null for never expires
+  maxOpens        Int?           // null for unlimited
+  openCount       Int            @default(0)
+  isActive        Boolean        @default(true)
+
+  // Optional label/name for the share
+  label           String?        @db.VarChar(255)
+
+  // Lifecycle
+  createdAt       DateTime       @default(now())
+
+  // Relations
+  file            File           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  createdBy       User           @relation(fields: [createdById], references: [id])
+  accessLogs      ShareAccessLog[]
+
+  @@index([token])
+  @@index([fileId])
+  @@index([createdById])
+  @@schema("public")
+}
+
+/// Access logging for file shares
+model ShareAccessLog {
+  id              String         @id @default(uuid()) @db.Uuid
+  shareId         String         @db.Uuid
+  accessedAt      DateTime       @default(now())
+  ipAddress       String?        @db.Inet
+  userAgent       String?
+  geoCountry      String?        @db.VarChar(2)
+  geoCity         String?        @db.VarChar(100)
+  actionType      String         @db.VarChar(20) // 'view', 'download', 'password_fail'
+
+  // Relations
+  share           FileShare      @relation(fields: [shareId], references: [id], onDelete: Cascade)
+
+  @@index([shareId])
+  @@index([accessedAt])
   @@schema("public")
 }
 

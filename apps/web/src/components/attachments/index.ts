@@ -10,6 +10,8 @@ export * from './AudioAttachment';
 export * from './VideoAttachment';
 export * from './DocumentAttachment';
 export * from './AttachmentRenderer';
+export * from './SecureFileRenderer';
 export * from './Lightbox';
 
 export { AttachmentRenderer as default } from './AttachmentRenderer';
+export { SecureFileRenderer } from './SecureFileRenderer';

@@ -15,6 +15,7 @@ import {
   Image,
 } from 'lucide-react';
 import { adminApi, getErrorMessage } from '../../lib/api';
+import { Toggle } from '../../components/ui/Toggle';
 
 interface AvailableFeature {
   key: string;
@@ -179,25 +180,11 @@ export function FeatureFlags() {
                     <p className="text-sm text-neon-text-muted">{feature.description}</p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => toggleFlag(feature.key)}
-                  className={`relative w-14 h-8 rounded-full transition-colors ${
-                    isEnabled ? 'bg-neon-success' : 'bg-neon-border'
-                  }`}
-                  role="switch"
-                  aria-checked={isEnabled}
+                <Toggle
+                  checked={isEnabled}
+                  onChange={() => toggleFlag(feature.key)}
                   aria-label={`Toggle ${feature.name}`}
-                >
-                  <span
-                    className={`absolute left-1 top-1 w-6 h-6 bg-white rounded-full shadow-sm transition-transform ${
-                      isEnabled ? 'translate-x-6' : 'translate-x-0'
-                    }`}
-                  />
-                  <span className="sr-only">
-                    {isEnabled ? 'Enabled' : 'Disabled'}
-                  </span>
-                </button>
+                />
               </div>
             );
           })}
