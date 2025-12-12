@@ -605,15 +605,20 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
       attachments,
     };
 
-    // Update conversation last message info
-    const preview = messageContent || (validFiles.length > 0 ? `Sent ${validFiles.length} file(s)` : '');
-    await prisma.conversation.update({
-      where: { id: req.params.id },
-      data: {
-        lastMessageAt: message.createdAt,
-        lastMessagePreview: preview.substring(0, 100),
-      },
-    });
+    // Update conversation last message info - don't fail if this errors
+    try {
+      const preview = messageContent || (validFiles.length > 0 ? `Sent ${validFiles.length} file(s)` : '');
+      await prisma.conversation.update({
+        where: { id: req.params.id },
+        data: {
+          lastMessageAt: message.createdAt,
+          lastMessagePreview: preview.substring(0, 100),
+        },
+      });
+    } catch (updateError) {
+      console.error(`[Conversations API] Failed to update conversation lastMessageAt:`, updateError);
+      // Don't fail - message was saved successfully
+    }
 
     // Log the message send for audit
     await AuditService.log({
@@ -626,25 +631,35 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
       ipAddress: req.ip,
     });
 
-    // Broadcast message to all conversation participants via Socket.IO for real-time delivery
-    // Using broadcastToConversationParticipants which handles both EventBus (cross-instance) and direct socket emission
-    console.log(`[Conversations API] Broadcasting new message ${message.id} in conversation ${req.params.id}`);
-    await broadcastToConversationParticipants(req.params.id!, SocketEvents.MESSAGE_RECEIVED, messageResponse);
-    console.log(`[Conversations API] Broadcast complete for message ${message.id}`);
+    // Broadcast and publish events - these are fire-and-forget and shouldn't fail the request
+    // The message is already saved, so these are just notifications
+    try {
+      console.log(`[Conversations API] Broadcasting new message ${message.id} in conversation ${req.params.id}`);
+      await broadcastToConversationParticipants(req.params.id!, SocketEvents.MESSAGE_RECEIVED, messageResponse);
+      console.log(`[Conversations API] Broadcast complete for message ${message.id}`);
+    } catch (broadcastError) {
+      console.error(`[Conversations API] Failed to broadcast message ${message.id}:`, broadcastError);
+      // Don't fail the request - message was saved successfully
+    }
 
     // Publish event for webhooks
-    await publishEvent('message:created', {
-      orgId: req.orgId,
-      conversationId: req.params.id,
-      message: {
-        id: message.id,
-        senderId: message.senderId,
-        content: message.content,
-        type: message.type,
-        createdAt: message.createdAt,
-        attachments: attachments.length > 0 ? attachments : undefined,
-      },
-    });
+    try {
+      await publishEvent('message:created', {
+        orgId: req.orgId,
+        conversationId: req.params.id,
+        message: {
+          id: message.id,
+          senderId: message.senderId,
+          content: message.content,
+          type: message.type,
+          createdAt: message.createdAt,
+          attachments: attachments.length > 0 ? attachments : undefined,
+        },
+      });
+    } catch (webhookError) {
+      console.error(`[Conversations API] Failed to publish webhook event for message ${message.id}:`, webhookError);
+      // Don't fail the request - message was saved successfully
+    }
 
     res.status(201).json({
       success: true,
