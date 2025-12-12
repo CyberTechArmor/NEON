@@ -145,6 +145,25 @@ export const conversationsApi = {
 
   removeParticipant: (id: string, userId: string) =>
     api.delete(`/conversations/${id}/participants/${userId}`),
+
+  /**
+   * List all files shared in a conversation
+   */
+  listFiles: (id: string, params?: { cursor?: string; limit?: number; type?: 'image' | 'video' | 'audio' | 'document'; search?: string }) =>
+    api.get<ApiResponse<Array<{
+      id: string;
+      name: string;
+      mimeType: string;
+      size: number;
+      url: string | null;
+      thumbnailUrl: string | null;
+      uploadedAt: string;
+      message: {
+        id: string;
+        sentAt: string;
+        sender: { id: string; displayName: string; avatarUrl: string | null };
+      };
+    }>> & { meta: { counts: { total: number; images: number; videos: number; audio: number; documents: number } } }>(`/conversations/${id}/files`, { params }),
 };
 
 export const messagesApi = {

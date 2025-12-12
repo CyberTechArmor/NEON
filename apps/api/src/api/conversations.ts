@@ -9,6 +9,7 @@ import { authenticate } from '../middleware/auth';
 import { canCommunicate, canFreeze } from '../services/permissions';
 import { AuditService } from '../services/audit';
 import { publishEvent } from '../services/eventbus';
+import { S3Service } from '../services/s3';
 import { broadcastToConversation, broadcastToConversationParticipants } from '../socket';
 import { SocketEvents } from '@neon/shared';
 import { CHAT_LIMITS } from '@neon/shared';
@@ -590,6 +591,204 @@ router.post('/:id/freeze', async (req: Request, res: Response, next: NextFunctio
       success: true,
       data: { message: 'User frozen in conversation' },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /conversations/:id/files
+ * List all files shared in a conversation with filtering and pagination
+ */
+router.get('/:id/files', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const {
+      cursor,
+      limit = '20',
+      type, // Filter by mime type prefix: 'image', 'video', 'audio', 'document'
+      search // Search by file name
+    } = req.query;
+
+    const limitNum = Math.min(parseInt(limit as string) || 20, 50);
+
+    // Verify user is a participant
+    const participant = await prisma.conversationParticipant.findFirst({
+      where: {
+        conversationId: id,
+        userId: req.userId!,
+        leftAt: null,
+      },
+      include: {
+        conversation: {
+          select: { orgId: true, deletedAt: true },
+        },
+      },
+    });
+
+    if (!participant || participant.conversation.deletedAt) {
+      throw new NotFoundError('Conversation', id);
+    }
+
+    // Build file filter
+    const mimeTypeFilter: Record<string, string> = {
+      image: 'image/',
+      video: 'video/',
+      audio: 'audio/',
+      document: 'application/',
+    };
+
+    const fileWhereClause: Record<string, unknown> = {
+      deletedAt: null,
+      orgId: req.orgId!,
+    };
+
+    if (type && typeof type === 'string' && mimeTypeFilter[type]) {
+      fileWhereClause.mimeType = { startsWith: mimeTypeFilter[type] };
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      fileWhereClause.name = { contains: search.trim(), mode: 'insensitive' };
+    }
+
+    // Query files from messages in this conversation
+    const messageFiles = await prisma.messageFile.findMany({
+      where: {
+        message: {
+          conversationId: id,
+          deletedAt: null,
+        },
+        file: fileWhereClause,
+        ...(cursor ? { createdAt: { lt: new Date(cursor as string) } } : {}),
+      },
+      include: {
+        file: {
+          select: {
+            id: true,
+            name: true,
+            mimeType: true,
+            size: true,
+            bucket: true,
+            key: true,
+            thumbnailKey: true,
+            createdAt: true,
+          },
+        },
+        message: {
+          select: {
+            id: true,
+            createdAt: true,
+            sender: {
+              select: { id: true, displayName: true, avatarUrl: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limitNum + 1,
+    });
+
+    const hasMore = messageFiles.length > limitNum;
+    const data = hasMore ? messageFiles.slice(0, -1) : messageFiles;
+
+    // Generate presigned URLs for each file
+    const filesWithUrls = await Promise.all(
+      data.map(async (mf) => {
+        let url: string | null = null;
+        let thumbnailUrl: string | null = null;
+
+        try {
+          url = await S3Service.getSignedUrlForOrg(req.orgId!, mf.file.key);
+          if (mf.file.thumbnailKey) {
+            thumbnailUrl = await S3Service.getSignedUrlForOrg(req.orgId!, mf.file.thumbnailKey);
+          }
+        } catch {
+          // Fallback to bucket-based URL
+          try {
+            url = await S3Service.getSignedUrl(mf.file.bucket, mf.file.key);
+          } catch (e) {
+            console.error(`Failed to get URL for file ${mf.file.id}:`, e);
+          }
+        }
+
+        return {
+          id: mf.file.id,
+          name: mf.file.name,
+          mimeType: mf.file.mimeType,
+          size: Number(mf.file.size),
+          url,
+          thumbnailUrl,
+          uploadedAt: mf.file.createdAt,
+          message: {
+            id: mf.message.id,
+            sentAt: mf.message.createdAt,
+            sender: mf.message.sender,
+          },
+        };
+      })
+    );
+
+    // Get file type counts for the conversation
+    const typeCounts = await prisma.messageFile.groupBy({
+      by: [],
+      where: {
+        message: {
+          conversationId: id,
+          deletedAt: null,
+        },
+        file: { deletedAt: null, orgId: req.orgId! },
+      },
+      _count: true,
+    });
+
+    // Calculate type-specific counts
+    const imageCount = await prisma.messageFile.count({
+      where: {
+        message: { conversationId: id, deletedAt: null },
+        file: { deletedAt: null, orgId: req.orgId!, mimeType: { startsWith: 'image/' } },
+      },
+    });
+
+    const videoCount = await prisma.messageFile.count({
+      where: {
+        message: { conversationId: id, deletedAt: null },
+        file: { deletedAt: null, orgId: req.orgId!, mimeType: { startsWith: 'video/' } },
+      },
+    });
+
+    const audioCount = await prisma.messageFile.count({
+      where: {
+        message: { conversationId: id, deletedAt: null },
+        file: { deletedAt: null, orgId: req.orgId!, mimeType: { startsWith: 'audio/' } },
+      },
+    });
+
+    const documentCount = await prisma.messageFile.count({
+      where: {
+        message: { conversationId: id, deletedAt: null },
+        file: { deletedAt: null, orgId: req.orgId!, mimeType: { startsWith: 'application/' } },
+      },
+    });
+
+    res.json({
+      success: true,
+      data: filesWithUrls,
+      meta: {
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+        pagination: {
+          hasMore,
+          cursor: data.length > 0 ? data[data.length - 1]!.createdAt.toISOString() : null,
+        },
+        counts: {
+          total: typeCounts[0]?._count || 0,
+          images: imageCount,
+          videos: videoCount,
+          audio: audioCount,
+          documents: documentCount,
+        },
+      },
     });
   } catch (error) {
     next(error);
