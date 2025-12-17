@@ -95,14 +95,18 @@ export const useMeetStore = create<MeetState>()(
           state.lastConfigFetch &&
           Date.now() - state.lastConfigFetch < CONFIG_CACHE_DURATION
         ) {
+          console.log('[MeetStore] Using cached config');
           return;
         }
 
         set({ configLoading: true, configError: null });
 
         try {
+          console.log('[MeetStore] Fetching MEET config...');
           const response = await adminApi.meet.get();
           const data = response.data.data;
+
+          console.log('[MeetStore] MEET config received:', data);
 
           set({
             config: {
@@ -116,9 +120,18 @@ export const useMeetStore = create<MeetState>()(
             lastConfigFetch: Date.now(),
           });
         } catch (error: any) {
+          console.error('[MeetStore] Failed to fetch MEET config:', error);
+          // Set a default unconfigured state so buttons show with proper message
           set({
+            config: {
+              configured: false,
+              enabled: false,
+              baseUrl: '',
+              autoJoin: true,
+              defaultQuality: 'auto',
+            },
             configLoading: false,
-            configError: error.message || 'Failed to fetch MEET configuration',
+            configError: error.response?.data?.error?.message || error.message || 'Failed to fetch MEET configuration',
           });
         }
       },

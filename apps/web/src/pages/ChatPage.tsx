@@ -626,6 +626,8 @@ export default function ChatPage() {
   const { joinConversation, leaveConversation, sendTyping, stopTyping, isConnected } = useSocketStore();
   const {
     config: meetConfig,
+    configLoading: meetConfigLoading,
+    configError: meetConfigError,
     activeCall,
     isJoining: isJoiningCall,
     showChatSidebar,
@@ -1184,7 +1186,14 @@ export default function ChatPage() {
                   <button
                     className="btn btn-icon btn-ghost hidden sm:flex opacity-50 cursor-not-allowed"
                     disabled
-                    title={meetConfig?.configured ? 'Voice calls disabled' : 'MEET integration not configured'}
+                    title={
+                      meetConfigLoading ? 'Loading MEET configuration...' :
+                      meetConfigError ? `MEET error: ${meetConfigError}` :
+                      !isFeatureEnabled('voice_calls') ? 'Voice calls disabled by admin' :
+                      !meetConfig?.configured ? 'MEET integration not configured' :
+                      !meetConfig?.enabled ? 'MEET integration disabled' :
+                      'Voice calls unavailable'
+                    }
                   >
                     <Phone className="w-5 h-5" />
                   </button>
@@ -1207,7 +1216,14 @@ export default function ChatPage() {
                   <button
                     className="btn btn-icon btn-ghost opacity-50 cursor-not-allowed"
                     disabled
-                    title={meetConfig?.configured ? 'Video calls disabled' : 'MEET integration not configured'}
+                    title={
+                      meetConfigLoading ? 'Loading MEET configuration...' :
+                      meetConfigError ? `MEET error: ${meetConfigError}` :
+                      !isFeatureEnabled('video_calls') ? 'Video calls disabled by admin' :
+                      !meetConfig?.configured ? 'MEET integration not configured' :
+                      !meetConfig?.enabled ? 'MEET integration disabled' :
+                      'Video calls unavailable'
+                    }
                   >
                     <Video className="w-5 h-5" />
                   </button>
