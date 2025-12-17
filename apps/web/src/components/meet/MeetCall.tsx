@@ -169,7 +169,7 @@ export function MeetCall({ className = '' }: MeetCallProps) {
         <iframe
           ref={iframeRef}
           src={activeCall.joinUrl}
-          allow="camera; microphone; display-capture; autoplay"
+          allow="camera *; microphone *; display-capture *; autoplay *; fullscreen *; speaker-selection *; encrypted-media *; picture-in-picture *; clipboard-write *; clipboard-read *"
           allowFullScreen
           className="w-full h-full border-0"
         />
@@ -210,7 +210,7 @@ export function MeetCall({ className = '' }: MeetCallProps) {
         <iframe
           ref={iframeRef}
           src={activeCall.joinUrl}
-          allow="camera; microphone; display-capture; autoplay"
+          allow="camera *; microphone *; display-capture *; autoplay *; fullscreen *; speaker-selection *; encrypted-media *; picture-in-picture *; clipboard-write *; clipboard-read *"
           allowFullScreen
           className="flex-1 w-full border-0"
         />
@@ -287,7 +287,7 @@ export function EmbeddedMeetCall({ className = '' }: { className?: string }) {
       {/* Embedded Iframe */}
       <iframe
         src={activeCall.joinUrl}
-        allow="camera; microphone; display-capture; autoplay"
+        allow="camera *; microphone *; display-capture *; autoplay *; fullscreen *; speaker-selection *; encrypted-media *; picture-in-picture *; clipboard-write *; clipboard-read *"
         allowFullScreen
         className="flex-1 w-full border-0"
       />
@@ -337,7 +337,8 @@ export function MobileMeetPip() {
       <div className="aspect-video bg-black relative">
         <iframe
           src={activeCall.joinUrl}
-          allow="camera; microphone; display-capture; autoplay"
+          allow="camera *; microphone *; display-capture *; autoplay *; fullscreen *; speaker-selection *; encrypted-media *; picture-in-picture *; clipboard-write *; clipboard-read *"
+          allowFullScreen
           className="w-full h-full border-0"
         />
       </div>
