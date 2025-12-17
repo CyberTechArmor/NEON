@@ -16,7 +16,7 @@ export const DEFAULT_FEATURE_FLAGS: Record<string, boolean> = {
   meetings: true,
   screen_share: true,
   file_uploads: true,
-  rich_attachments: false, // New feature, disabled by default
+  rich_attachments: true, // Enable rich attachments by default
 };
 
 // Cache TTL in seconds

@@ -146,7 +146,7 @@ function NewChatModal({
             <button
               className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
                 chatType === 'direct'
-                  ? 'bg-neon-accent text-white'
+                  ? 'bg-neon-accent text-neon-bg'
                   : 'bg-neon-surface-hover text-neon-text-muted hover:text-white'
               }`}
               onClick={() => {
@@ -159,7 +159,7 @@ function NewChatModal({
             <button
               className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
                 chatType === 'group'
-                  ? 'bg-neon-accent text-white'
+                  ? 'bg-neon-accent text-neon-bg'
                   : 'bg-neon-surface-hover text-neon-text-muted hover:text-white'
               }`}
               onClick={() => setChatType('group')}
@@ -626,6 +626,8 @@ export default function ChatPage() {
   const { joinConversation, leaveConversation, sendTyping, stopTyping, isConnected } = useSocketStore();
   const {
     config: meetConfig,
+    configLoading: meetConfigLoading,
+    configError: meetConfigError,
     activeCall,
     isJoining: isJoiningCall,
     showChatSidebar,
@@ -670,44 +672,6 @@ export default function ChatPage() {
     setMessageInput((prev) => prev + emoji);
     inputRef.current?.focus();
   }, []);
-
-  // Handle starting a video/voice call
-  const handleStartCall = useCallback(async (voiceOnly: boolean = false) => {
-    if (!conversationId || !currentConversation) {
-      toast.error('Please select a conversation first');
-      return;
-    }
-
-    // Build participants list
-    const participants = currentConversation.participants
-      .filter((p: any) => p.userId !== user?.id)
-      .map((p: any) => ({
-        id: p.user?.id || p.userId,
-        displayName: p.user?.displayName || p.user?.name || 'Unknown',
-        avatarUrl: p.user?.avatarUrl,
-      }));
-
-    // Generate display name based on conversation type
-    let displayName: string;
-    if (currentConversation.type === 'DIRECT' && participants.length === 1) {
-      // For 1-on-1 chats, use both participant names
-      displayName = `${user?.displayName || user?.name} & ${participants[0].displayName}`;
-    } else if (currentConversation.name) {
-      displayName = currentConversation.name;
-    } else {
-      displayName = generateDisplayName(participants);
-    }
-
-    try {
-      await startCall({
-        conversationId,
-        participants,
-        displayName,
-      });
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to start call');
-    }
-  }, [conversationId, currentConversation, user, startCall]);
 
   // File handling functions
   const addFiles = useCallback((files: File[]) => {
@@ -921,10 +885,19 @@ export default function ChatPage() {
     }
   }, [isConnected, conversationId, joinConversation]);
 
-  // Scroll to bottom when messages change
+  // Fetch MEET integration config on mount
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages[conversationId || '']?.length]);
+    fetchMeetConfig();
+  }, [fetchMeetConfig]);
+
+  // Scroll to bottom when messages change or conversation changes
+  useEffect(() => {
+    // Use a small timeout to ensure DOM has updated
+    const timer = setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [conversationId, messages[conversationId || '']?.length]);
 
   // Handle typing indicator
   const handleTyping = useCallback(() => {
@@ -1006,6 +979,44 @@ export default function ChatPage() {
   const currentConversation = conversations.find((c) => c.id === conversationId);
   const currentMessages = messages[conversationId || ''] || [];
   const currentTypingUsers = typingUsers[conversationId || ''] || [];
+
+  // Handle starting a video/voice call
+  const handleStartCall = useCallback(async (voiceOnly: boolean = false) => {
+    if (!conversationId || !currentConversation) {
+      toast.error('Please select a conversation first');
+      return;
+    }
+
+    // Build participants list
+    const participants = currentConversation.participants
+      .filter((p: any) => p.userId !== user?.id)
+      .map((p: any) => ({
+        id: p.user?.id || p.userId,
+        displayName: p.user?.displayName || p.user?.name || 'Unknown',
+        avatarUrl: p.user?.avatarUrl,
+      }));
+
+    // Generate display name based on conversation type
+    let displayName: string;
+    if (currentConversation.type === 'DIRECT' && participants.length === 1) {
+      // For 1-on-1 chats, use both participant names
+      displayName = `${user?.name} & ${participants[0].displayName}`;
+    } else if (currentConversation.name) {
+      displayName = currentConversation.name;
+    } else {
+      displayName = generateDisplayName(participants);
+    }
+
+    try {
+      await startCall({
+        conversationId,
+        participants,
+        displayName,
+      });
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to start call');
+    }
+  }, [conversationId, currentConversation, user, startCall]);
 
   // Handle back button on mobile
   const handleBackToList = () => {
@@ -1175,7 +1186,14 @@ export default function ChatPage() {
                   <button
                     className="btn btn-icon btn-ghost hidden sm:flex opacity-50 cursor-not-allowed"
                     disabled
-                    title={meetConfig?.configured ? 'Voice calls disabled' : 'MEET integration not configured'}
+                    title={
+                      meetConfigLoading ? 'Loading MEET configuration...' :
+                      meetConfigError ? `MEET error: ${meetConfigError}` :
+                      !isFeatureEnabled('voice_calls') ? 'Voice calls disabled by admin' :
+                      !meetConfig?.configured ? 'MEET integration not configured' :
+                      !meetConfig?.enabled ? 'MEET integration disabled' :
+                      'Voice calls unavailable'
+                    }
                   >
                     <Phone className="w-5 h-5" />
                   </button>
@@ -1198,7 +1216,14 @@ export default function ChatPage() {
                   <button
                     className="btn btn-icon btn-ghost opacity-50 cursor-not-allowed"
                     disabled
-                    title={meetConfig?.configured ? 'Video calls disabled' : 'MEET integration not configured'}
+                    title={
+                      meetConfigLoading ? 'Loading MEET configuration...' :
+                      meetConfigError ? `MEET error: ${meetConfigError}` :
+                      !isFeatureEnabled('video_calls') ? 'Video calls disabled by admin' :
+                      !meetConfig?.configured ? 'MEET integration not configured' :
+                      !meetConfig?.enabled ? 'MEET integration disabled' :
+                      'Video calls unavailable'
+                    }
                   >
                     <Video className="w-5 h-5" />
                   </button>

@@ -194,6 +194,19 @@ function UserFormModal({
             </div>
           )}
 
+          {/* Department */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Department</label>
+            <select className="input" {...register('departmentId')}>
+              <option value="">No department</option>
+              {departments.map((dept: any) => (
+                <option key={dept.id} value={dept.id}>
+                  {dept.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Role */}
           <div>
             <label className="block text-sm font-medium mb-2">Role</label>
@@ -208,19 +221,6 @@ function UserFormModal({
             {errors.roleId && (
               <p className="mt-1 text-sm text-neon-error">{errors.roleId.message}</p>
             )}
-          </div>
-
-          {/* Department */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Department</label>
-            <select className="input" {...register('departmentId')}>
-              <option value="">No department</option>
-              {departments.map((dept: any) => (
-                <option key={dept.id} value={dept.id}>
-                  {dept.name}
-                </option>
-              ))}
-            </select>
           </div>
 
           {/* Actions */}

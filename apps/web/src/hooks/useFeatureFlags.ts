@@ -16,7 +16,7 @@ const DEFAULT_FLAGS: Record<string, boolean> = {
   meetings: true,
   screen_share: true,
   file_uploads: true,
-  rich_attachments: false,
+  rich_attachments: true,
 };
 
 interface UseFeatureFlagsReturn {

@@ -626,7 +626,7 @@ function DepartmentFormModal({
 // Main component
 export default function RolesPermissions() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'roles' | 'departments'>('roles');
+  const [activeTab, setActiveTab] = useState<'roles' | 'departments'>('departments');
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showDepartmentModal, setShowDepartmentModal] = useState(false);
   const [editingRole, setEditingRole] = useState<Role | undefined>();
@@ -682,19 +682,6 @@ export default function RolesPermissions() {
       <div className="flex items-center gap-4 mb-6 border-b border-neon-border">
         <button
           className={`pb-3 px-1 border-b-2 font-medium transition-colors ${
-            activeTab === 'roles'
-              ? 'border-white text-white'
-              : 'border-transparent text-neon-text-muted hover:text-white'
-          }`}
-          onClick={() => setActiveTab('roles')}
-        >
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4" />
-            <span>Roles</span>
-          </div>
-        </button>
-        <button
-          className={`pb-3 px-1 border-b-2 font-medium transition-colors ${
             activeTab === 'departments'
               ? 'border-white text-white'
               : 'border-transparent text-neon-text-muted hover:text-white'
@@ -704,6 +691,19 @@ export default function RolesPermissions() {
           <div className="flex items-center gap-2">
             <Building2 className="w-4 h-4" />
             <span>Departments</span>
+          </div>
+        </button>
+        <button
+          className={`pb-3 px-1 border-b-2 font-medium transition-colors ${
+            activeTab === 'roles'
+              ? 'border-white text-white'
+              : 'border-transparent text-neon-text-muted hover:text-white'
+          }`}
+          onClick={() => setActiveTab('roles')}
+        >
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4" />
+            <span>Roles</span>
           </div>
         </button>
       </div>

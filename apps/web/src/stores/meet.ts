@@ -95,14 +95,18 @@ export const useMeetStore = create<MeetState>()(
           state.lastConfigFetch &&
           Date.now() - state.lastConfigFetch < CONFIG_CACHE_DURATION
         ) {
+          console.log('[MeetStore] Using cached config');
           return;
         }
 
         set({ configLoading: true, configError: null });
 
         try {
+          console.log('[MeetStore] Fetching MEET config...');
           const response = await adminApi.meet.get();
           const data = response.data.data;
+
+          console.log('[MeetStore] MEET config received:', data);
 
           set({
             config: {
@@ -116,9 +120,18 @@ export const useMeetStore = create<MeetState>()(
             lastConfigFetch: Date.now(),
           });
         } catch (error: any) {
+          console.error('[MeetStore] Failed to fetch MEET config:', error);
+          // Set a default unconfigured state so buttons show with proper message
           set({
+            config: {
+              configured: false,
+              enabled: false,
+              baseUrl: '',
+              autoJoin: true,
+              defaultQuality: 'auto',
+            },
             configLoading: false,
-            configError: error.message || 'Failed to fetch MEET configuration',
+            configError: error.response?.data?.error?.message || error.message || 'Failed to fetch MEET configuration',
           });
         }
       },
@@ -141,8 +154,9 @@ export const useMeetStore = create<MeetState>()(
 
         const config = get().config;
         if (!config || !config.configured || !config.enabled) {
-          set({ joinError: 'MEET integration is not configured or disabled' });
-          return;
+          const errorMsg = 'MEET integration is not configured or disabled';
+          set({ joinError: errorMsg });
+          throw new Error(errorMsg);
         }
 
         set({ isJoining: true, joinError: null });
@@ -152,7 +166,7 @@ export const useMeetStore = create<MeetState>()(
           // Remove any special characters and limit length
           const roomName = `neon-${conversationId.replace(/-/g, '').slice(0, 16)}`;
 
-          // Create room on MEET server
+          // Create or get existing room on MEET server
           const response = await adminApi.meet.createRoom({
             roomName,
             displayName: `NEON Call - ${displayName}`,
@@ -187,10 +201,12 @@ export const useMeetStore = create<MeetState>()(
             showChatSidebar: false,
           });
         } catch (error: any) {
+          const errorMsg = error.response?.data?.error?.message || error.message || 'Failed to start call';
           set({
             isJoining: false,
-            joinError: error.response?.data?.error?.message || error.message || 'Failed to start call',
+            joinError: errorMsg,
           });
+          throw new Error(errorMsg);
         }
       },
 

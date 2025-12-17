@@ -2985,8 +2985,10 @@ router.get('/storage/stats', requirePermission('storage:browse'), async (req: Re
 /**
  * GET /admin/integrations/meet
  * Get MEET integration configuration
+ * Note: No permission required - any authenticated user can check if MEET is configured
+ * (API key is not exposed in the response)
  */
-router.get('/integrations/meet', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/integrations/meet', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const integration = await prisma.meetIntegration.findUnique({
       where: { orgId: req.orgId! },
@@ -3270,7 +3272,7 @@ router.post('/integrations/meet/test', requirePermission('org:manage_settings'),
       });
     }
 
-    const statsData = await statsResponse.json();
+    const statsData: any = await statsResponse.json();
 
     // Fetch settings to get customizable options
     let settingsData: any = {};
@@ -3441,7 +3443,8 @@ router.get('/integrations/meet/join-url', async (req: Request, res: Response, ne
 
 /**
  * POST /admin/integrations/meet/create-room
- * Create a room on the MEET server
+ * Create or get a room on the MEET server
+ * If room already exists, returns the existing room's join URL
  */
 router.post('/integrations/meet/create-room', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -3467,6 +3470,41 @@ router.post('/integrations/meet/create-room', async (req: Request, res: Response
       });
     }
 
+    // Build join URL helper
+    const buildJoinUrl = (room: string) => {
+      const params = new URLSearchParams();
+      params.set('room', room);
+      if (integration.autoJoin) params.set('autojoin', 'true');
+      return `${integration.baseUrl}/?${params.toString()}`;
+    };
+
+    // First, try to get the existing room
+    try {
+      const getResponse = await fetch(`${integration.baseUrl}/api/rooms/${encodeURIComponent(roomName)}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'X-API-Key': integration.apiKey,
+        },
+      });
+
+      if (getResponse.ok) {
+        // Room exists, return the join URL
+        const existingRoom: any = await getResponse.json();
+        return res.json({
+          success: true,
+          data: {
+            room: existingRoom.room || existingRoom,
+            joinUrl: buildJoinUrl(roomName),
+            existed: true,
+          },
+          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        });
+      }
+    } catch {
+      // Room doesn't exist or error checking, proceed to create
+    }
+
     // Create room on MEET server
     const response = await fetch(`${integration.baseUrl}/api/rooms`, {
       method: 'POST',
@@ -3483,6 +3521,20 @@ router.post('/integrations/meet/create-room', async (req: Request, res: Response
 
     if (!response.ok) {
       const errorText = await response.text();
+
+      // Check if error is "room already exists" - if so, just return the join URL
+      if (errorText.includes('already exists') || errorText.includes('Room already exists')) {
+        return res.json({
+          success: true,
+          data: {
+            room: { name: roomName, displayName: displayName || roomName },
+            joinUrl: buildJoinUrl(roomName),
+            existed: true,
+          },
+          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        });
+      }
+
       return res.status(response.status).json({
         success: false,
         error: { code: 'MEET_ERROR', message: `Failed to create room: ${errorText}` },
@@ -3490,18 +3542,14 @@ router.post('/integrations/meet/create-room', async (req: Request, res: Response
       });
     }
 
-    const roomData = await response.json();
-
-    // Build join URL
-    const params = new URLSearchParams();
-    params.set('room', roomName);
-    if (integration.autoJoin) params.set('autojoin', 'true');
+    const roomData: any = await response.json();
 
     return res.json({
       success: true,
       data: {
         room: roomData.room,
-        joinUrl: `${integration.baseUrl}/?${params.toString()}`,
+        joinUrl: buildJoinUrl(roomName),
+        existed: false,
       },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
