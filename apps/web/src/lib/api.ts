@@ -650,6 +650,54 @@ export const adminApi = {
     },
   },
 
+  // MEET Integration
+  meet: {
+    get: () => api.get<ApiResponse<{
+      configured: boolean;
+      baseUrl: string;
+      isConnected: boolean;
+      enabled: boolean;
+      autoJoin?: boolean;
+      defaultQuality?: string;
+      options?: Record<string, unknown>;
+      lastCheckedAt?: string;
+      lastError?: string;
+      hasApiKey?: boolean;
+    }>>('/admin/integrations/meet'),
+
+    save: (data: { baseUrl: string; apiKey?: string; enabled?: boolean; autoJoin?: boolean; defaultQuality?: string }) =>
+      api.post<ApiResponse<{
+        configured: boolean;
+        baseUrl: string;
+        isConnected: boolean;
+        enabled: boolean;
+        autoJoin: boolean;
+        defaultQuality: string;
+        options: Record<string, unknown>;
+        hasApiKey: boolean;
+      }>>('/admin/integrations/meet', data),
+
+    test: (data?: { baseUrl?: string; apiKey?: string }) =>
+      api.post<ApiResponse<{
+        connected: boolean;
+        error?: string;
+        latency?: number;
+        serverInfo?: { version: string; activeRooms: number; totalParticipants: number };
+        settings?: Record<string, unknown>;
+        recommendations?: Record<string, unknown>;
+      }>>('/admin/integrations/meet/test', data || {}),
+
+    delete: () => api.delete<ApiResponse<{ message: string }>>('/admin/integrations/meet'),
+
+    getJoinUrl: (roomName: string, displayName?: string, quality?: string) =>
+      api.get<ApiResponse<{ joinUrl: string; roomName: string; baseUrl: string }>>('/admin/integrations/meet/join-url', {
+        params: { roomName, displayName, quality },
+      }),
+
+    createRoom: (data: { roomName: string; displayName?: string; maxParticipants?: number }) =>
+      api.post<ApiResponse<{ room: { name: string; displayName: string }; joinUrl: string }>>('/admin/integrations/meet/create-room', data),
+  },
+
   // Storage browser
   storage: {
     browse: (params?: { prefix?: string; limit?: number; cursor?: string; flat?: boolean }) =>

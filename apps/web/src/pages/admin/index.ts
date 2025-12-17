@@ -7,3 +7,4 @@ export { default as AdminSettings } from './AdminSettings';
 export { default as Developers } from './Developers';
 export { default as FeatureFlags } from './FeatureFlags';
 export { default as StorageBrowser } from './StorageBrowser';
+export { default as Integrations } from './Integrations';
