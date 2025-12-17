@@ -3270,7 +3270,7 @@ router.post('/integrations/meet/test', requirePermission('org:manage_settings'),
       });
     }
 
-    const statsData = await statsResponse.json();
+    const statsData: any = await statsResponse.json();
 
     // Fetch settings to get customizable options
     let settingsData: any = {};
@@ -3490,7 +3490,7 @@ router.post('/integrations/meet/create-room', async (req: Request, res: Response
       });
     }
 
-    const roomData = await response.json();
+    const roomData: any = await response.json();
 
     // Build join URL
     const params = new URLSearchParams();
