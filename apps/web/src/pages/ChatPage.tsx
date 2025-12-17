@@ -146,7 +146,7 @@ function NewChatModal({
             <button
               className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
                 chatType === 'direct'
-                  ? 'bg-neon-accent text-white'
+                  ? 'bg-neon-accent text-neon-bg'
                   : 'bg-neon-surface-hover text-neon-text-muted hover:text-white'
               }`}
               onClick={() => {
@@ -159,7 +159,7 @@ function NewChatModal({
             <button
               className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
                 chatType === 'group'
-                  ? 'bg-neon-accent text-white'
+                  ? 'bg-neon-accent text-neon-bg'
                   : 'bg-neon-surface-hover text-neon-text-muted hover:text-white'
               }`}
               onClick={() => setChatType('group')}
@@ -883,10 +883,14 @@ export default function ChatPage() {
     }
   }, [isConnected, conversationId, joinConversation]);
 
-  // Scroll to bottom when messages change
+  // Scroll to bottom when messages change or conversation changes
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages[conversationId || '']?.length]);
+    // Use a small timeout to ensure DOM has updated
+    const timer = setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [conversationId, messages[conversationId || '']?.length]);
 
   // Handle typing indicator
   const handleTyping = useCallback(() => {
