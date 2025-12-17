@@ -2985,8 +2985,10 @@ router.get('/storage/stats', requirePermission('storage:browse'), async (req: Re
 /**
  * GET /admin/integrations/meet
  * Get MEET integration configuration
+ * Note: No permission required - any authenticated user can check if MEET is configured
+ * (API key is not exposed in the response)
  */
-router.get('/integrations/meet', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/integrations/meet', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const integration = await prisma.meetIntegration.findUnique({
       where: { orgId: req.orgId! },

@@ -883,6 +883,11 @@ export default function ChatPage() {
     }
   }, [isConnected, conversationId, joinConversation]);
 
+  // Fetch MEET integration config on mount
+  useEffect(() => {
+    fetchMeetConfig();
+  }, [fetchMeetConfig]);
+
   // Scroll to bottom when messages change or conversation changes
   useEffect(() => {
     // Use a small timeout to ensure DOM has updated
