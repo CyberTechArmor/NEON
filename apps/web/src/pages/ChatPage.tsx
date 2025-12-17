@@ -38,10 +38,12 @@ import { formatDistanceToNow } from 'date-fns';
 import { useChatStore } from '../stores/chat';
 import { useSocketStore } from '../stores/socket';
 import { useAuthStore } from '../stores/auth';
+import { useMeetStore, generateDisplayName } from '../stores/meet';
 import { conversationsApi, messagesApi, usersApi, filesApi, getErrorMessage } from '../lib/api';
 import { useFeatureFlags } from '../hooks/useFeatureFlags';
 import { AttachmentRenderer } from '../components/attachments';
 import { ChatFileBrowser } from '../components/chat';
+import { EmbeddedMeetCall } from '../components/meet';
 
 interface UserForChat {
   id: string;
@@ -622,6 +624,14 @@ export default function ChatPage() {
     setHasMoreMessages,
   } = useChatStore();
   const { joinConversation, leaveConversation, sendTyping, stopTyping, isConnected } = useSocketStore();
+  const {
+    config: meetConfig,
+    activeCall,
+    isJoining: isJoiningCall,
+    showChatSidebar,
+    startCall,
+    fetchConfig: fetchMeetConfig,
+  } = useMeetStore();
 
   const [messageInput, setMessageInput] = useState('');
   const [replyTo, setReplyTo] = useState<any>(null);
@@ -660,6 +670,44 @@ export default function ChatPage() {
     setMessageInput((prev) => prev + emoji);
     inputRef.current?.focus();
   }, []);
+
+  // Handle starting a video/voice call
+  const handleStartCall = useCallback(async (voiceOnly: boolean = false) => {
+    if (!conversationId || !currentConversation) {
+      toast.error('Please select a conversation first');
+      return;
+    }
+
+    // Build participants list
+    const participants = currentConversation.participants
+      .filter((p: any) => p.userId !== user?.id)
+      .map((p: any) => ({
+        id: p.user?.id || p.userId,
+        displayName: p.user?.displayName || p.user?.name || 'Unknown',
+        avatarUrl: p.user?.avatarUrl,
+      }));
+
+    // Generate display name based on conversation type
+    let displayName: string;
+    if (currentConversation.type === 'DIRECT' && participants.length === 1) {
+      // For 1-on-1 chats, use both participant names
+      displayName = `${user?.displayName || user?.name} & ${participants[0].displayName}`;
+    } else if (currentConversation.name) {
+      displayName = currentConversation.name;
+    } else {
+      displayName = generateDisplayName(participants);
+    }
+
+    try {
+      await startCall({
+        conversationId,
+        participants,
+        displayName,
+      });
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to start call');
+    }
+  }, [conversationId, currentConversation, user, startCall]);
 
   // File handling functions
   const addFiles = useCallback((files: File[]) => {
@@ -1113,28 +1161,44 @@ export default function ChatPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                {isFeatureEnabled('voice_calls') ? (
-                  <button className="btn btn-icon btn-ghost hidden sm:flex">
+                {/* Voice Call Button */}
+                {isFeatureEnabled('voice_calls') && meetConfig?.configured && meetConfig?.enabled ? (
+                  <button
+                    className="btn btn-icon btn-ghost hidden sm:flex"
+                    onClick={() => handleStartCall(true)}
+                    disabled={isJoiningCall || !!activeCall}
+                    title={activeCall ? 'Call in progress' : 'Start voice call'}
+                  >
                     <Phone className="w-5 h-5" />
                   </button>
                 ) : (
                   <button
                     className="btn btn-icon btn-ghost hidden sm:flex opacity-50 cursor-not-allowed"
                     disabled
-                    title="Voice calls coming soon"
+                    title={meetConfig?.configured ? 'Voice calls disabled' : 'MEET integration not configured'}
                   >
                     <Phone className="w-5 h-5" />
                   </button>
                 )}
-                {isFeatureEnabled('video_calls') ? (
-                  <button className="btn btn-icon btn-ghost">
-                    <Video className="w-5 h-5" />
+                {/* Video Call Button */}
+                {isFeatureEnabled('video_calls') && meetConfig?.configured && meetConfig?.enabled ? (
+                  <button
+                    className={`btn btn-icon btn-ghost ${activeCall?.conversationId === conversationId ? 'text-neon-success' : ''}`}
+                    onClick={() => handleStartCall(false)}
+                    disabled={isJoiningCall || !!activeCall}
+                    title={activeCall ? 'Call in progress' : 'Start video call'}
+                  >
+                    {isJoiningCall ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Video className="w-5 h-5" />
+                    )}
                   </button>
                 ) : (
                   <button
                     className="btn btn-icon btn-ghost opacity-50 cursor-not-allowed"
                     disabled
-                    title="Video calls coming soon"
+                    title={meetConfig?.configured ? 'Video calls disabled' : 'MEET integration not configured'}
                   >
                     <Video className="w-5 h-5" />
                   </button>
@@ -1161,69 +1225,149 @@ export default function ChatPage() {
               />
             )}
 
-            {/* Messages - scrollable area (only this section scrolls) */}
-            <div
-              ref={messagesContainerRef}
-              className="flex-1 overflow-y-auto p-4 flex flex-col min-h-0 overflow-x-hidden"
-            >
-              {isLoadingMessages ? (
-                <div className="flex items-center justify-center py-8 flex-1">
-                  <Loader2 className="w-6 h-6 animate-spin text-neon-text-muted" />
+            {/* Video Call + Chat Area Container */}
+            {activeCall?.conversationId === conversationId && activeCall.viewMode === 'embedded' ? (
+              /* Active call for this conversation - show embedded video with optional chat sidebar */
+              <div className="flex-1 flex overflow-hidden">
+                {/* Video Call Area */}
+                <div className={`flex-1 min-w-0 ${showChatSidebar ? 'hidden lg:flex' : 'flex'}`}>
+                  <EmbeddedMeetCall className="w-full h-full" />
                 </div>
-              ) : currentMessages.length === 0 ? (
-                <div className="text-center py-8 text-neon-text-muted flex-1 flex flex-col items-center justify-center">
-                  <p>No messages yet</p>
-                  <p className="text-sm">Send a message to start the conversation</p>
-                </div>
-              ) : (
-                <>
-                  {/* Spacer to push messages to bottom when few messages */}
-                  <div className="flex-1 min-h-0" />
-                  {/* Messages container with proper spacing */}
-                  <div className="space-y-3">
-                    {currentMessages.map((message) => (
-                      <MessageBubble
-                        key={message.id}
-                        message={message}
-                        isOwn={message.senderId === user?.id}
-                        onReply={() => setReplyTo(message)}
-                        onEdit={() => {
-                          setEditingMessage(message);
-                          setMessageInput(message.content);
-                        }}
-                        onDelete={() => {
-                          // TODO: Implement delete
-                        }}
-                        richAttachmentsEnabled={isFeatureEnabled('rich_attachments')}
-                      />
-                    ))}
+
+                {/* Chat Sidebar during call (desktop: side panel, mobile: full screen) */}
+                {showChatSidebar && (
+                  <div className="w-full lg:w-80 flex flex-col border-l border-neon-border bg-neon-surface">
+                    {/* Chat header */}
+                    <div className="flex-shrink-0 h-12 px-4 flex items-center justify-between border-b border-neon-border">
+                      <span className="text-sm font-medium">Chat</span>
+                    </div>
+
+                    {/* Messages */}
+                    <div
+                      ref={messagesContainerRef}
+                      className="flex-1 overflow-y-auto p-3 flex flex-col min-h-0"
+                    >
+                      <div className="flex-1 min-h-0" />
+                      <div className="space-y-2">
+                        {currentMessages.slice(-20).map((message) => (
+                          <div
+                            key={message.id}
+                            className={`flex ${message.senderId === user?.id ? 'justify-end' : 'justify-start'}`}
+                          >
+                            <div
+                              className={`max-w-[85%] px-3 py-1.5 rounded-lg text-sm ${
+                                message.senderId === user?.id
+                                  ? 'bg-neon-accent text-white'
+                                  : 'bg-neon-surface-hover'
+                              }`}
+                            >
+                              {message.senderId !== user?.id && (
+                                <p className="text-xs text-neon-text-muted mb-0.5">
+                                  {message.sender?.displayName || message.sender?.name}
+                                </p>
+                              )}
+                              <p>{message.content}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div ref={messagesEndRef} />
+                    </div>
+
+                    {/* Compact input */}
+                    <div className="flex-shrink-0 p-2 border-t border-neon-border">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          className="input py-2 text-sm"
+                          placeholder="Type a message..."
+                          value={messageInput}
+                          onChange={(e) => setMessageInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSendMessage();
+                            }
+                          }}
+                        />
+                        <button
+                          className="btn btn-icon btn-primary btn-sm"
+                          onClick={handleSendMessage}
+                          disabled={!messageInput.trim()}
+                        >
+                          <Send className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </>
-              )}
+                )}
+              </div>
+            ) : (
+              /* Normal messages view (no active call for this conversation) */
+              <>
+                {/* Messages - scrollable area (only this section scrolls) */}
+                <div
+                  ref={messagesContainerRef}
+                  className="flex-1 overflow-y-auto p-4 flex flex-col min-h-0 overflow-x-hidden"
+                >
+                  {isLoadingMessages ? (
+                    <div className="flex items-center justify-center py-8 flex-1">
+                      <Loader2 className="w-6 h-6 animate-spin text-neon-text-muted" />
+                    </div>
+                  ) : currentMessages.length === 0 ? (
+                    <div className="text-center py-8 text-neon-text-muted flex-1 flex flex-col items-center justify-center">
+                      <p>No messages yet</p>
+                      <p className="text-sm">Send a message to start the conversation</p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Spacer to push messages to bottom when few messages */}
+                      <div className="flex-1 min-h-0" />
+                      {/* Messages container with proper spacing */}
+                      <div className="space-y-3">
+                        {currentMessages.map((message) => (
+                          <MessageBubble
+                            key={message.id}
+                            message={message}
+                            isOwn={message.senderId === user?.id}
+                            onReply={() => setReplyTo(message)}
+                            onEdit={() => {
+                              setEditingMessage(message);
+                              setMessageInput(message.content);
+                            }}
+                            onDelete={() => {
+                              // TODO: Implement delete
+                            }}
+                            richAttachmentsEnabled={isFeatureEnabled('rich_attachments')}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
 
-              {/* Typing indicator */}
-              {currentTypingUsers.length > 0 && (
-                <div className="flex items-center gap-2 text-sm text-neon-text-muted mt-4">
-                  <div className="typing-indicator">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <span>
-                    {currentTypingUsers.map((u) => u.name).join(', ')}{' '}
-                    {currentTypingUsers.length === 1 ? 'is' : 'are'} typing...
-                  </span>
+                  {/* Typing indicator */}
+                  {currentTypingUsers.length > 0 && (
+                    <div className="flex items-center gap-2 text-sm text-neon-text-muted mt-4">
+                      <div className="typing-indicator">
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                      <span>
+                        {currentTypingUsers.map((u) => u.name).join(', ')}{' '}
+                        {currentTypingUsers.length === 1 ? 'is' : 'are'} typing...
+                      </span>
+                    </div>
+                  )}
+
+                  <div ref={messagesEndRef} />
                 </div>
-              )}
 
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Reply/Edit indicator - sticky above input */}
-            {(replyTo || editingMessage) && (
-              <div className="flex-shrink-0 px-4 py-2 bg-neon-surface border-t border-neon-border flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm">
-                  {replyTo ? (
+                {/* Reply/Edit indicator - sticky above input */}
+                {(replyTo || editingMessage) && (
+                  <div className="flex-shrink-0 px-4 py-2 bg-neon-surface border-t border-neon-border flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm">
+                      {replyTo ? (
                     <>
                       <Reply className="w-4 h-4 text-neon-text-muted" />
                       <span className="text-neon-text-muted">Replying to</span>
@@ -1397,6 +1541,8 @@ export default function ChatPage() {
                 </button>
               </div>
             </div>
+          </>
+            )}
           </>
         ) : (
           // Empty state

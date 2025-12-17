@@ -24,6 +24,7 @@ import {
   Settings,
   Code,
   ToggleLeft,
+  Plug,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { adminApi, getErrorMessage } from '../lib/api';
@@ -39,6 +40,7 @@ import {
   Developers,
   FeatureFlags,
   StorageBrowser,
+  Integrations,
 } from './admin';
 
 // Helper function to format bytes
@@ -661,6 +663,12 @@ export default function AdminPage() {
       permission: 'org:manage_settings',
     },
     {
+      to: '/admin/integrations',
+      icon: Plug,
+      label: 'Integrations',
+      permission: 'org:manage_settings',
+    },
+    {
       to: '/admin/settings',
       icon: Settings,
       label: 'Settings',
@@ -705,6 +713,7 @@ export default function AdminPage() {
           <Route path="features" element={<FeatureFlags />} />
           <Route path="storage" element={<StorageBrowser />} />
           <Route path="developers" element={<Developers />} />
+          <Route path="integrations" element={<Integrations />} />
           <Route path="settings" element={<AdminSettings />} />
         </Routes>
       </div>

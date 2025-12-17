@@ -2978,4 +2978,541 @@ router.get('/storage/stats', requirePermission('storage:browse'), async (req: Re
   }
 });
 
+// =============================================================================
+// MEET INTEGRATION ENDPOINTS
+// =============================================================================
+
+/**
+ * GET /admin/integrations/meet
+ * Get MEET integration configuration
+ */
+router.get('/integrations/meet', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const integration = await prisma.meetIntegration.findUnique({
+      where: { orgId: req.orgId! },
+    });
+
+    if (!integration) {
+      return res.json({
+        success: true,
+        data: {
+          configured: false,
+          baseUrl: '',
+          isConnected: false,
+          enabled: false,
+          options: {},
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        configured: true,
+        baseUrl: integration.baseUrl,
+        isConnected: integration.isConnected,
+        enabled: integration.enabled,
+        autoJoin: integration.autoJoin,
+        defaultQuality: integration.defaultQuality,
+        options: integration.options,
+        lastCheckedAt: integration.lastCheckedAt?.toISOString(),
+        lastError: integration.lastError,
+        // Don't expose the actual API key, just show if it's set
+        hasApiKey: !!integration.apiKey,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error: any) {
+    console.error('[Admin] MEET integration get error:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: error.message || 'Failed to get MEET integration' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  }
+});
+
+/**
+ * POST /admin/integrations/meet
+ * Create or update MEET integration configuration
+ */
+router.post('/integrations/meet', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { baseUrl, apiKey, enabled, autoJoin, defaultQuality } = req.body;
+
+    if (!baseUrl) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Base URL is required' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Check if integration already exists
+    const existing = await prisma.meetIntegration.findUnique({
+      where: { orgId: req.orgId! },
+    });
+
+    const integrationData: any = {
+      baseUrl: baseUrl.replace(/\/$/, ''), // Remove trailing slash
+      enabled: enabled ?? true,
+      autoJoin: autoJoin ?? true,
+      defaultQuality: defaultQuality || 'auto',
+      updatedAt: new Date(),
+    };
+
+    // Only update apiKey if provided (allows updating other fields without changing key)
+    if (apiKey) {
+      integrationData.apiKey = apiKey;
+    }
+
+    let integration;
+    if (existing) {
+      integration = await prisma.meetIntegration.update({
+        where: { orgId: req.orgId! },
+        data: integrationData,
+      });
+    } else {
+      if (!apiKey) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_REQUEST', message: 'API key is required for initial setup' },
+          meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+        });
+      }
+
+      integration = await prisma.meetIntegration.create({
+        data: {
+          orgId: req.orgId!,
+          ...integrationData,
+          apiKey: apiKey,
+          createdBy: req.userId!,
+        },
+      });
+    }
+
+    // Log the action
+    await AuditService.log({
+      action: existing ? 'integration.meet.updated' : 'integration.meet.created',
+      resourceType: 'meet_integration',
+      resourceId: integration.id,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { baseUrl: integration.baseUrl, enabled: integration.enabled },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        configured: true,
+        baseUrl: integration.baseUrl,
+        isConnected: integration.isConnected,
+        enabled: integration.enabled,
+        autoJoin: integration.autoJoin,
+        defaultQuality: integration.defaultQuality,
+        options: integration.options,
+        hasApiKey: true,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error: any) {
+    console.error('[Admin] MEET integration save error:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: error.message || 'Failed to save MEET integration' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  }
+});
+
+/**
+ * POST /admin/integrations/meet/test
+ * Test MEET connection and fetch available options
+ */
+router.post('/integrations/meet/test', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { baseUrl, apiKey } = req.body;
+
+    // Get existing integration if no credentials provided
+    let testUrl = baseUrl;
+    let testKey = apiKey;
+
+    if (!testUrl || !testKey) {
+      const existing = await prisma.meetIntegration.findUnique({
+        where: { orgId: req.orgId! },
+      });
+
+      if (existing) {
+        testUrl = testUrl || existing.baseUrl;
+        testKey = testKey || existing.apiKey;
+      }
+    }
+
+    if (!testUrl || !testKey) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Base URL and API key are required' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Clean URL
+    const cleanUrl = testUrl.replace(/\/$/, '');
+
+    // Test connection by calling the /health endpoint
+    const startTime = Date.now();
+    let healthResponse;
+    try {
+      healthResponse = await fetch(`${cleanUrl}/health`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+    } catch (fetchError: any) {
+      // Update integration status
+      await prisma.meetIntegration.updateMany({
+        where: { orgId: req.orgId! },
+        data: {
+          isConnected: false,
+          lastCheckedAt: new Date(),
+          lastError: `Connection failed: ${fetchError.message}`,
+        },
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          connected: false,
+          error: `Connection failed: ${fetchError.message}`,
+          latency: null,
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const latency = Date.now() - startTime;
+
+    if (!healthResponse.ok) {
+      await prisma.meetIntegration.updateMany({
+        where: { orgId: req.orgId! },
+        data: {
+          isConnected: false,
+          lastCheckedAt: new Date(),
+          lastError: `Health check failed with status ${healthResponse.status}`,
+        },
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          connected: false,
+          error: `Health check failed with status ${healthResponse.status}`,
+          latency,
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Now test the API key by fetching stats (requires auth)
+    let statsResponse;
+    try {
+      statsResponse = await fetch(`${cleanUrl}/api/admin/stats`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'X-API-Key': testKey,
+        },
+      });
+    } catch (fetchError: any) {
+      await prisma.meetIntegration.updateMany({
+        where: { orgId: req.orgId! },
+        data: {
+          isConnected: false,
+          lastCheckedAt: new Date(),
+          lastError: `API key validation failed: ${fetchError.message}`,
+        },
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          connected: false,
+          error: `API key validation failed: ${fetchError.message}`,
+          latency,
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    if (!statsResponse.ok) {
+      const errorText = await statsResponse.text();
+      await prisma.meetIntegration.updateMany({
+        where: { orgId: req.orgId! },
+        data: {
+          isConnected: false,
+          lastCheckedAt: new Date(),
+          lastError: `API key invalid or unauthorized (${statsResponse.status})`,
+        },
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          connected: false,
+          error: `API key invalid or unauthorized (${statsResponse.status})`,
+          latency,
+        },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const statsData = await statsResponse.json();
+
+    // Fetch settings to get customizable options
+    let settingsData: any = {};
+    try {
+      const settingsResponse = await fetch(`${cleanUrl}/api/admin/settings`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'X-API-Key': testKey,
+        },
+      });
+      if (settingsResponse.ok) {
+        settingsData = await settingsResponse.json();
+      }
+    } catch {
+      // Settings fetch is optional
+    }
+
+    // Update integration with connection status and options
+    await prisma.meetIntegration.updateMany({
+      where: { orgId: req.orgId! },
+      data: {
+        isConnected: true,
+        lastCheckedAt: new Date(),
+        lastError: null,
+        options: {
+          serverVersion: statsData.version || 'unknown',
+          activeRooms: statsData.activeRooms || 0,
+          totalParticipants: statsData.totalParticipants || 0,
+          settings: settingsData.settings || {},
+          recommendations: settingsData.recommendations || {},
+        },
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        connected: true,
+        latency,
+        serverInfo: {
+          version: statsData.version || 'unknown',
+          activeRooms: statsData.activeRooms || 0,
+          totalParticipants: statsData.totalParticipants || 0,
+        },
+        settings: settingsData.settings || {},
+        recommendations: settingsData.recommendations || {},
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error: any) {
+    console.error('[Admin] MEET integration test error:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: error.message || 'Failed to test MEET connection' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  }
+});
+
+/**
+ * DELETE /admin/integrations/meet
+ * Remove MEET integration
+ */
+router.delete('/integrations/meet', requirePermission('org:manage_settings'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const existing = await prisma.meetIntegration.findUnique({
+      where: { orgId: req.orgId! },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'MEET integration not found' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    await prisma.meetIntegration.delete({
+      where: { orgId: req.orgId! },
+    });
+
+    // Log the action
+    await AuditService.log({
+      action: 'integration.meet.deleted',
+      resourceType: 'meet_integration',
+      resourceId: existing.id,
+      actorId: req.userId,
+      orgId: req.orgId,
+      details: { baseUrl: existing.baseUrl },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+
+    return res.json({
+      success: true,
+      data: { message: 'MEET integration removed successfully' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error: any) {
+    console.error('[Admin] MEET integration delete error:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: error.message || 'Failed to delete MEET integration' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  }
+});
+
+/**
+ * GET /admin/integrations/meet/join-url
+ * Get a join URL for a MEET room
+ */
+router.get('/integrations/meet/join-url', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { roomName, displayName, quality } = req.query;
+
+    if (!roomName) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Room name is required' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const integration = await prisma.meetIntegration.findUnique({
+      where: { orgId: req.orgId! },
+    });
+
+    if (!integration || !integration.enabled) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_CONFIGURED', message: 'MEET integration is not configured or disabled' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Build the join URL
+    const params = new URLSearchParams();
+    params.set('room', roomName as string);
+    if (displayName) params.set('name', displayName as string);
+    if (integration.autoJoin && displayName) params.set('autojoin', 'true');
+    const effectiveQuality = (quality as string) || integration.defaultQuality;
+    if (effectiveQuality && effectiveQuality !== 'auto') {
+      params.set('quality', effectiveQuality);
+    }
+
+    const joinUrl = `${integration.baseUrl}/?${params.toString()}`;
+
+    return res.json({
+      success: true,
+      data: {
+        joinUrl,
+        roomName,
+        baseUrl: integration.baseUrl,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error: any) {
+    console.error('[Admin] MEET join URL error:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: error.message || 'Failed to generate join URL' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  }
+});
+
+/**
+ * POST /admin/integrations/meet/create-room
+ * Create a room on the MEET server
+ */
+router.post('/integrations/meet/create-room', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { roomName, displayName, maxParticipants } = req.body;
+
+    if (!roomName) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Room name is required' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const integration = await prisma.meetIntegration.findUnique({
+      where: { orgId: req.orgId! },
+    });
+
+    if (!integration || !integration.enabled) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_CONFIGURED', message: 'MEET integration is not configured or disabled' },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // Create room on MEET server
+    const response = await fetch(`${integration.baseUrl}/api/rooms`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': integration.apiKey,
+      },
+      body: JSON.stringify({
+        roomName,
+        displayName: displayName || roomName,
+        maxParticipants: maxParticipants || 100,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.status(response.status).json({
+        success: false,
+        error: { code: 'MEET_ERROR', message: `Failed to create room: ${errorText}` },
+        meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const roomData = await response.json();
+
+    // Build join URL
+    const params = new URLSearchParams();
+    params.set('room', roomName);
+    if (integration.autoJoin) params.set('autojoin', 'true');
+
+    return res.json({
+      success: true,
+      data: {
+        room: roomData.room,
+        joinUrl: `${integration.baseUrl}/?${params.toString()}`,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error: any) {
+    console.error('[Admin] MEET create room error:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: error.message || 'Failed to create room' },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  }
+});
+
 export { router as adminRouter };
