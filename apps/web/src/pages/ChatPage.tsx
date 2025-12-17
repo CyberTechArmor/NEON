@@ -671,44 +671,6 @@ export default function ChatPage() {
     inputRef.current?.focus();
   }, []);
 
-  // Handle starting a video/voice call
-  const handleStartCall = useCallback(async (voiceOnly: boolean = false) => {
-    if (!conversationId || !currentConversation) {
-      toast.error('Please select a conversation first');
-      return;
-    }
-
-    // Build participants list
-    const participants = currentConversation.participants
-      .filter((p: any) => p.userId !== user?.id)
-      .map((p: any) => ({
-        id: p.user?.id || p.userId,
-        displayName: p.user?.displayName || p.user?.name || 'Unknown',
-        avatarUrl: p.user?.avatarUrl,
-      }));
-
-    // Generate display name based on conversation type
-    let displayName: string;
-    if (currentConversation.type === 'DIRECT' && participants.length === 1) {
-      // For 1-on-1 chats, use both participant names
-      displayName = `${user?.displayName || user?.name} & ${participants[0].displayName}`;
-    } else if (currentConversation.name) {
-      displayName = currentConversation.name;
-    } else {
-      displayName = generateDisplayName(participants);
-    }
-
-    try {
-      await startCall({
-        conversationId,
-        participants,
-        displayName,
-      });
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to start call');
-    }
-  }, [conversationId, currentConversation, user, startCall]);
-
   // File handling functions
   const addFiles = useCallback((files: File[]) => {
     const validFiles = files.filter((file) => {
@@ -1006,6 +968,44 @@ export default function ChatPage() {
   const currentConversation = conversations.find((c) => c.id === conversationId);
   const currentMessages = messages[conversationId || ''] || [];
   const currentTypingUsers = typingUsers[conversationId || ''] || [];
+
+  // Handle starting a video/voice call
+  const handleStartCall = useCallback(async (voiceOnly: boolean = false) => {
+    if (!conversationId || !currentConversation) {
+      toast.error('Please select a conversation first');
+      return;
+    }
+
+    // Build participants list
+    const participants = currentConversation.participants
+      .filter((p: any) => p.userId !== user?.id)
+      .map((p: any) => ({
+        id: p.user?.id || p.userId,
+        displayName: p.user?.displayName || p.user?.name || 'Unknown',
+        avatarUrl: p.user?.avatarUrl,
+      }));
+
+    // Generate display name based on conversation type
+    let displayName: string;
+    if (currentConversation.type === 'DIRECT' && participants.length === 1) {
+      // For 1-on-1 chats, use both participant names
+      displayName = `${user?.name} & ${participants[0].displayName}`;
+    } else if (currentConversation.name) {
+      displayName = currentConversation.name;
+    } else {
+      displayName = generateDisplayName(participants);
+    }
+
+    try {
+      await startCall({
+        conversationId,
+        participants,
+        displayName,
+      });
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to start call');
+    }
+  }, [conversationId, currentConversation, user, startCall]);
 
   // Handle back button on mobile
   const handleBackToList = () => {
