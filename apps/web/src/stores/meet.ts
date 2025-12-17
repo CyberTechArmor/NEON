@@ -141,8 +141,9 @@ export const useMeetStore = create<MeetState>()(
 
         const config = get().config;
         if (!config || !config.configured || !config.enabled) {
-          set({ joinError: 'MEET integration is not configured or disabled' });
-          return;
+          const errorMsg = 'MEET integration is not configured or disabled';
+          set({ joinError: errorMsg });
+          throw new Error(errorMsg);
         }
 
         set({ isJoining: true, joinError: null });
@@ -152,7 +153,7 @@ export const useMeetStore = create<MeetState>()(
           // Remove any special characters and limit length
           const roomName = `neon-${conversationId.replace(/-/g, '').slice(0, 16)}`;
 
-          // Create room on MEET server
+          // Create or get existing room on MEET server
           const response = await adminApi.meet.createRoom({
             roomName,
             displayName: `NEON Call - ${displayName}`,
@@ -187,10 +188,12 @@ export const useMeetStore = create<MeetState>()(
             showChatSidebar: false,
           });
         } catch (error: any) {
+          const errorMsg = error.response?.data?.error?.message || error.message || 'Failed to start call';
           set({
             isJoining: false,
-            joinError: error.response?.data?.error?.message || error.message || 'Failed to start call',
+            joinError: errorMsg,
           });
+          throw new Error(errorMsg);
         }
       },
 
