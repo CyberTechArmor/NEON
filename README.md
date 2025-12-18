@@ -210,7 +210,7 @@ We welcome contributions. Please read our contributing guidelines before submitt
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+NEON Sustainable Use License — see [LICENSE](LICENSE) for details.
 
 ---
 
