@@ -1,0 +1,126 @@
+# NEON Sustainable Use License
+
+Version 1.0
+
+## Acceptance
+
+By using the software, you agree to all of the terms and conditions below.
+
+## Copyright License
+
+The licensor grants you a non-exclusive, royalty-free, worldwide, non-sublicensable, non-transferable license to use, copy, distribute, make available, and prepare derivative works of the software, in each case subject to the limitations below.
+
+## Limitations
+
+You may use or modify the software only for your own internal business purposes or for non-commercial or personal use.
+
+You may distribute the software or provide it to others only if you do so free of charge for non-commercial purposes.
+
+You may not provide the software to third parties as a hosted or managed service, where the service provides users with access to any substantial set of the features or functionality of the software.
+
+You may not move, change, disable, or circumvent the license key functionality in the software, and you may not remove or obscure any functionality in the software that is protected by the license key.
+
+You may not alter, remove, or obscure any licensing, copyright, or other notices of the licensor in the software. Any use of the licensor's trademarks is subject to applicable law.
+
+## Permitted Uses
+
+The following uses are expressly permitted under this license:
+
+**Internal Business Use**: You may deploy and use NEON within your organization for internal collaboration, communication, and business operations, regardless of the size of your organization.
+
+**Personal and Non-Commercial Use**: You may use NEON for personal projects, education, research, or any non-commercial purpose.
+
+**Consulting and Support Services**: You may provide consulting, implementation, training, customization, and support services related to NEON to third parties, and charge fees for such services.
+
+**Custom Development**: You may develop custom integrations, plugins, extensions, and modifications to NEON for your own use or for clients as part of consulting services.
+
+**Contribution**: You may contribute modifications, improvements, and extensions back to the NEON project.
+
+## Prohibited Uses
+
+The following uses are expressly prohibited under this license:
+
+**Competing Hosted Service**: You may not offer NEON, or any derivative work of NEON, as a hosted service where users pay for access to NEON functionality. This includes offering NEON as a software-as-a-service (SaaS), platform-as-a-service (PaaS), or any similar hosted offering that competes with services offered by the licensor.
+
+**White-Labeling for Sale**: You may not rebrand, white-label, or resell NEON or any derivative work as your own product or service for a fee.
+
+**Embedding in Commercial Products**: You may not embed or include NEON as a component of a commercial product or service that you sell, unless you have obtained a separate commercial license from the licensor.
+
+**Circumventing Restrictions**: You may not use technical means to circumvent, disable, or remove any license restrictions, usage limitations, or license key protections in the software.
+
+## Patents
+
+The licensor grants you a license, under any patent claims the licensor can license, or becomes able to license, to make, have made, use, sell, offer for sale, import, and have imported the software, in each case subject to the limitations and conditions in this license. This license does not cover any patent claims that you cause to be infringed by modifications or additions to the software.
+
+## Fair Use and Fair Code
+
+NEON is distributed under the fair-code model. Fair-code is not a software license itself, but describes a software model where:
+
+- Software is generally free to use and can be distributed by anybody
+- Source code is openly available
+- Software can be extended by anybody in public and private communities
+- Commercial use is restricted by the authors to ensure sustainability
+
+This license is designed to allow maximum freedom for individual users, developers, and organizations while protecting the project from commercial exploitation that would undermine its sustainability.
+
+## Contributions
+
+If you contribute modifications, enhancements, or other changes to NEON, you agree that:
+
+1. Your contributions are provided under this same license
+2. You have the right to make such contributions
+3. You grant the licensor a perpetual, worldwide, non-exclusive, royalty-free, irrevocable license to use, reproduce, modify, display, perform, sublicense, and distribute your contributions
+
+## Notices
+
+You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these terms.
+
+If you modify the software, you must include in any modified copies of the software prominent notices stating that you have modified the software.
+
+## No Other Rights
+
+These terms do not imply any licenses other than those expressly granted in these terms.
+
+## Termination
+
+If you use the software in violation of these terms, such use is not licensed, and your license will automatically terminate. If the licensor provides you with a notice of your violation, and you cease all violation of this license within 30 days of your receipt of that notice, your license will be reinstated retroactively. However, if you violate these terms after such reinstatement, any additional violation of these terms will cause your license to terminate automatically and permanently, without the possibility of reinstatement.
+
+## No Liability
+
+*As far as the law allows, the software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the software, under any kind of legal claim.*
+
+## Definitions
+
+**The "licensor"** is the entity offering these terms, Fractionate LLC, and its successors and assigns.
+
+**The "software"** is the NEON collaboration platform software the licensor makes available under these terms, including any portion of it.
+
+**"You"** refers to the individual or entity agreeing to these terms.
+
+**"Your organization"** is any legal entity, sole proprietorship, or other kind of organization that you work for, plus all entities that have control over, are under the control of, or are under common control with that organization. Control means ownership of substantially all the assets of an entity, or the power to direct its management and policies by vote, contract, or otherwise. Control can be direct or indirect.
+
+**"Your licenses"** are all the licenses granted to you for the software under these terms.
+
+**"Use"** means anything you do with the software requiring one of your licenses.
+
+**"Internal business purposes"** means use of the software within your organization for your organization's own operations, and does not include providing the software or its functionality to third parties.
+
+**"Non-commercial"** means not primarily intended for or directed towards commercial advantage or monetary compensation.
+
+**"Derivative work"** means any work that is based on or derived from the software, including modifications, translations, adaptations, and extensions.
+
+---
+
+## About This License
+
+The NEON Sustainable Use License is based on the Sustainable Use License created by n8n GmbH, which was itself based on the Elastic License 2.0. We are grateful to both organizations for their work in creating fair-code licensing models.
+
+This license is designed to ensure that NEON remains sustainable while providing maximum freedom to users, developers, and organizations who use it for legitimate purposes.
+
+For questions about this license or to inquire about commercial licensing options, please contact: legal@fractionate.io
+
+---
+
+**NEON Sustainable Use License v1.0**
+Copyright © 2025 Fractionate LLC
+All rights reserved.
