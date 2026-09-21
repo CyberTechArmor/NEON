@@ -8,7 +8,7 @@ import { createMeetingSchema, updateMeetingSchema, paginationSchema } from '@neo
 import { NotFoundError, ForbiddenError } from '@neon/shared';
 import { authenticate } from '../middleware/auth';
 import { AuditService } from '../services/audit';
-import { getLiveKitToken } from '../services/livekit';
+import { generateRoomCode, buildMeetSession, endMeeting } from '../services/meet';
 
 const router = Router();
 router.use(authenticate);
@@ -164,7 +164,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
 /**
  * POST /meetings/:id/join
- * Join meeting (get LiveKit token)
+ * Join meeting (get the MEET room to embed)
  */
 router.post('/:id/join', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -180,18 +180,18 @@ router.post('/:id/join', async (req: Request, res: Response, next: NextFunction)
       throw new NotFoundError('Meeting', req.params.id);
     }
 
-    // Generate LiveKit room name if not exists
+    // `livekitRoom` is the historical column name; it now holds a MEET room
+    // code, minted on the first join and reused by everyone after.
     let livekitRoom = meeting.livekitRoom;
     if (!livekitRoom) {
-      livekitRoom = `meeting-${meeting.id}`;
+      livekitRoom = await generateRoomCode();
       await prisma.meeting.update({
         where: { id: meeting.id },
         data: { livekitRoom },
       });
     }
 
-    // Get LiveKit token
-    const token = await getLiveKitToken(livekitRoom, req.userId!, req.user!.displayName);
+    const meet = buildMeetSession(livekitRoom, { name: req.user!.displayName });
 
     // Update participant join time
     await prisma.meetingParticipant.updateMany({
@@ -211,10 +211,34 @@ router.post('/:id/join', async (req: Request, res: Response, next: NextFunction)
       success: true,
       data: {
         meeting,
-        livekitUrl: process.env.LIVEKIT_URL,
-        token,
+        meet,
         roomName: livekitRoom,
       },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /meetings/:id/leave
+ * Leave a meeting without ending it for anyone else.
+ *
+ * The client calls this when MEET's embed reports a final departure. It is
+ * idempotent — a reconnect that ends in a real leave, or two windows closing
+ * at once, should not be an error.
+ */
+router.post('/:id/leave', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await prisma.meetingParticipant.updateMany({
+      where: { meetingId: req.params.id, userId: req.userId!, leftAt: null },
+      data: { leftAt: new Date() },
+    });
+
+    res.json({
+      success: true,
+      data: { message: 'Left meeting' },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
     });
   } catch (error) {
@@ -236,10 +260,16 @@ router.post('/:id/end', async (req: Request, res: Response, next: NextFunction) 
       throw new ForbiddenError('Only the host can end the meeting');
     }
 
-    await prisma.meeting.update({
+    const meeting = await prisma.meeting.update({
       where: { id: req.params.id },
       data: { status: 'ENDED', actualEnd: new Date() },
     });
+
+    // Disconnect anyone still in the MEET room. Best-effort: NEON's record is
+    // what decides the meeting is over.
+    if (meeting.livekitRoom) {
+      await endMeeting(meeting.livekitRoom, `neon-${req.userId!}`);
+    }
 
     res.json({
       success: true,

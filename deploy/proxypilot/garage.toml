@@ -1,0 +1,32 @@
+# =============================================================================
+# Garage S3 storage — production (single node)
+# =============================================================================
+# Credential-free on purpose: rpc_secret and admin_token are supplied through
+# GARAGE_RPC_SECRET / GARAGE_ADMIN_TOKEN, which Garage reads in preference to
+# this file. Keep it that way so this config can stay in git.
+#
+# Matched to Garage 1.x. The key named `replication_factor` here was
+# `replication_mode` before 1.0, so this file and the image tag in
+# docker-compose.prod.yml move together.
+# =============================================================================
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+
+# Single node: one copy of everything, and no quorum to satisfy.
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+# root_domain is deliberately unset: vhost-style addressing is off, so every
+# request is path-style. Pre-signed URLs are signed against the public hostname
+# with the bucket in the path, and ProxyPilot proxies that path verbatim.
+
+# No [s3_web] section: the static-website endpoint is unused, and in 1.x the
+# section is invalid without a root_domain.
+
+[admin]
+api_bind_addr = "[::]:3903"

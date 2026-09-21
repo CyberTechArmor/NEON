@@ -421,15 +421,12 @@ export default function MeetingsPage() {
   });
 
   // Join meeting
-  const handleJoin = async (meetingId: string) => {
-    try {
-      const response = await meetingsApi.join(meetingId);
-      const { token, url } = response.data.data;
-      // Navigate to meeting page with token
-      navigate(`/meeting/${meetingId}`, { state: { token, url } });
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-    }
+  //
+  // Just navigate: the meeting page shows its own pre-join screen and calls
+  // /join itself. Calling it here as well marked the participant as joined
+  // before they had agreed to join, and handed back a payload nothing read.
+  const handleJoin = (meetingId: string) => {
+    navigate(`/meeting/${meetingId}`);
   };
 
   const handleSubmit = (data: {

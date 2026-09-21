@@ -10,7 +10,7 @@ import { initiateCallSchema } from '@neon/shared';
 import { NotFoundError, ForbiddenError } from '@neon/shared';
 import { authenticate } from '../middleware/auth';
 import { canCommunicate } from '../services/permissions';
-import { getLiveKitToken } from '../services/livekit';
+import { generateRoomCode, buildMeetSession, endMeeting } from '../services/meet';
 import { sendNotification } from '../socket';
 
 const router = Router();
@@ -38,7 +38,9 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       }
     }
 
-    const roomName = `call-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    // `livekitRoom` is the historical column name; it now holds a MEET room
+    // code. Kept as-is so this needs no migration.
+    const roomName = await generateRoomCode();
 
     const call = await prisma.call.create({
       data: {
@@ -64,10 +66,9 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       },
     });
 
-    // Get LiveKit token for initiator
-    const token = await getLiveKitToken(roomName, req.userId!, req.user!.displayName, {
-      isHost: true,
-    });
+    // The initiator is whoever joins first, which MEET decides on its own —
+    // it reports isHost back over the embed bridge.
+    const meet = buildMeetSession(roomName, { name: req.user!.displayName });
 
     // Send call notifications to other participants
     for (const participantId of data.participantIds) {
@@ -84,8 +85,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       success: true,
       data: {
         call,
-        livekitUrl: process.env.LIVEKIT_URL,
-        token,
+        meet,
         roomName,
       },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -127,17 +127,14 @@ router.post('/:id/answer', async (req: Request, res: Response, next: NextFunctio
       });
     }
 
-    const token = await getLiveKitToken(
-      participant.call.livekitRoom,
-      req.userId!,
-      req.user!.displayName
-    );
+    const meet = buildMeetSession(participant.call.livekitRoom, {
+      name: req.user!.displayName,
+    });
 
     res.json({
       success: true,
       data: {
-        livekitUrl: process.env.LIVEKIT_URL,
-        token,
+        meet,
         roomName: participant.call.livekitRoom,
       },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -189,15 +186,64 @@ router.post('/:id/decline', async (req: Request, res: Response, next: NextFuncti
 });
 
 /**
+ * POST /calls/:id/join
+ * Join a call that is already under way.
+ *
+ * Distinct from /answer, which is the one-time transition out of `invited`.
+ * Joining is idempotent: reloading the tab, or rejoining after a drop, comes
+ * back here and should simply hand back the room again.
+ */
+router.post('/:id/join', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const participant = await prisma.callParticipant.findFirst({
+      where: { callId: req.params.id, userId: req.userId! },
+      include: { call: true },
+    });
+
+    if (!participant) {
+      throw new NotFoundError('Call', req.params.id);
+    }
+
+    if (participant.call.endedAt) {
+      throw new ForbiddenError('This call has ended');
+    }
+
+    if (participant.status !== 'connected') {
+      await prisma.callParticipant.update({
+        where: { id: participant.id },
+        data: { status: 'connected', joinedAt: participant.joinedAt ?? new Date(), leftAt: null },
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        meet: buildMeetSession(participant.call.livekitRoom, {
+          name: req.user!.displayName,
+        }),
+        roomName: participant.call.livekitRoom,
+      },
+      meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * POST /calls/:id/end
  * End a call
  */
 router.post('/:id/end', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await prisma.call.update({
+    const call = await prisma.call.update({
       where: { id: req.params.id },
       data: { endedAt: new Date(), endReason: 'completed' },
     });
+
+    // Tear the MEET room down too, so anyone still in it is disconnected
+    // rather than left talking to a call NEON considers over. Best-effort.
+    await endMeeting(call.livekitRoom, `neon-${req.userId!}`);
 
     await prisma.callParticipant.updateMany({
       where: { callId: req.params.id, status: { in: ['invited', 'joining', 'connected'] } },

@@ -21,6 +21,7 @@ import {
   getAvailableFeatureKeys,
 } from '../services/featureFlags';
 import { broadcastToOrg } from '../socket';
+import { checkMeetHealth } from '../services/meet';
 
 const config = getConfig();
 
@@ -103,56 +104,18 @@ async function checkStorageHealth(orgId: string): Promise<{ healthy: boolean; me
 }
 
 /**
- * Check LiveKit health (placeholder - implement based on your LiveKit setup)
- */
-async function checkLiveKitHealth(): Promise<{ healthy: boolean; message: string }> {
-  try {
-    // Check if LiveKit is configured
-    if (!config.livekit?.apiUrl || !config.livekit?.apiKey) {
-      return {
-        healthy: false,
-        message: 'LiveKit not configured',
-      };
-    }
-
-    // Simple connectivity check - ping the LiveKit server
-    const response = await fetch(`${config.livekit.apiUrl}/health`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(5000),
-    }).catch(() => null);
-
-    if (response && response.ok) {
-      return {
-        healthy: true,
-        message: 'LiveKit server connected',
-      };
-    }
-
-    return {
-      healthy: false,
-      message: 'LiveKit server not reachable',
-    };
-  } catch (error: any) {
-    return {
-      healthy: false,
-      message: `LiveKit check failed: ${error.message}`,
-    };
-  }
-}
-
-/**
  * GET /admin/health
  */
 router.get('/health', requirePermission('org:view_settings'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const [dbHealth, redisHealth, storageHealth, livekitHealth] = await Promise.all([
+    const [dbHealth, redisHealth, storageHealth, meetHealth] = await Promise.all([
       checkDatabaseHealth(),
       checkRedisHealth(),
       checkStorageHealth(req.orgId!),
-      checkLiveKitHealth(),
+      checkMeetHealth(),
     ]);
 
-    const allHealthy = dbHealth.healthy && redisHealth.healthy && storageHealth.healthy && livekitHealth.healthy;
+    const allHealthy = dbHealth.healthy && redisHealth.healthy && storageHealth.healthy && meetHealth.healthy;
     const coreHealthy = dbHealth.healthy && redisHealth.healthy;
 
     res.json({
@@ -162,7 +125,7 @@ router.get('/health', requirePermission('org:view_settings'), async (req: Reques
         database: dbHealth,
         redis: redisHealth,
         storage: storageHealth,
-        livekit: livekitHealth,
+        meet: meetHealth,
         jobs: getJobStatus(),
       },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },

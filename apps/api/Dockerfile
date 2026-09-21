@@ -2,13 +2,14 @@
 # Multi-stage build for production
 
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies (including openssl for Prisma) and update npm
-RUN apk add --no-cache python3 make g++ openssl openssl-dev && \
-    npm install -g npm@latest
+# Build dependencies, including openssl for Prisma. The image's bundled npm is
+# used as-is: a global `npm install -g npm@latest` here is what broke this
+# build once already, when npm@latest outran the image's Node.
+RUN apk add --no-cache python3 make g++ openssl openssl-dev
 
 # Copy all package files first for better layer caching
 COPY package*.json ./
@@ -48,13 +49,12 @@ RUN cd packages/database && npm run build
 RUN cd apps/api && npm run build
 
 # Production stage
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
-# Install openssl (required by Prisma) and update npm
-RUN apk add --no-cache openssl && \
-    npm install -g npm@latest
+# openssl is required by Prisma. Bundled npm again, see the builder stage.
+RUN apk add --no-cache openssl
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
@@ -88,9 +88,10 @@ USER neon
 # Expose port
 EXPOSE 3001
 
-# Health check
+# Health check. 127.0.0.1, not localhost: the API binds 0.0.0.0 (IPv4 only), while
+# busybox wget tries the ::1 that localhost also resolves to, and fails there.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3001/api/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3001/api/health || exit 1
 
 # Start the server
 CMD ["node", "apps/api/dist/index.js"]

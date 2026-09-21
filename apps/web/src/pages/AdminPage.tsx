@@ -72,7 +72,7 @@ interface AdminHealth {
   database?: HealthStatus;
   redis?: HealthStatus;
   storage?: HealthStatus;
-  livekit?: HealthStatus;
+  meet?: HealthStatus;
   jobs?: Record<string, { running?: boolean; description?: string; schedule?: string; lastRun?: string }>;
 }
 
@@ -207,23 +207,23 @@ function AdminDashboard() {
             )}
           </div>
 
-          {/* LiveKit */}
+          {/* MEET */}
           <div className="card p-4">
             <div className="flex items-center gap-3 mb-3">
               <Activity className="w-5 h-5 text-neon-text-muted" />
-              <span className="font-medium">LiveKit</span>
+              <span className="font-medium">MEET</span>
             </div>
             {isLoadingHealth ? (
               <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
               <div className="flex items-center gap-2">
-                {health?.livekit?.healthy ? (
+                {health?.meet?.healthy ? (
                   <Check className="w-5 h-5 text-neon-success" />
                 ) : (
                   <X className="w-5 h-5 text-neon-error" />
                 )}
-                <span className={health?.livekit?.healthy ? 'text-neon-success' : 'text-neon-error'}>
-                  {health?.livekit?.healthy ? 'Healthy' : 'Unhealthy'}
+                <span className={health?.meet?.healthy ? 'text-neon-success' : 'text-neon-error'}>
+                  {health?.meet?.healthy ? 'Healthy' : 'Unhealthy'}
                 </span>
               </div>
             )}
