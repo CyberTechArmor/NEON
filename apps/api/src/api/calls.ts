@@ -10,7 +10,13 @@ import { initiateCallSchema } from '@neon/shared';
 import { NotFoundError, ForbiddenError } from '@neon/shared';
 import { authenticate } from '../middleware/auth';
 import { canCommunicate } from '../services/permissions';
-import { generateRoomCode, buildMeetSession, endMeeting } from '../services/meet';
+import {
+  generateRoomCode,
+  buildMeetSession,
+  endMeeting,
+  getMeetIntegration,
+  requireMeetIntegration,
+} from '../services/meet';
 import { sendNotification } from '../socket';
 
 const router = Router();
@@ -38,9 +44,12 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       }
     }
 
+    // The organisation's MEET (Admin → Integrations). No MEET, no call.
+    const meet = await requireMeetIntegration(req.orgId!);
+
     // `livekitRoom` is the historical column name; it now holds a MEET room
     // code. Kept as-is so this needs no migration.
-    const roomName = await generateRoomCode();
+    const roomName = await generateRoomCode(meet);
 
     const call = await prisma.call.create({
       data: {
@@ -68,7 +77,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 
     // The initiator is whoever joins first, which MEET decides on its own —
     // it reports isHost back over the embed bridge.
-    const meet = buildMeetSession(roomName, { name: req.user!.displayName });
+    const session = buildMeetSession(meet, roomName, { name: req.user!.displayName });
 
     // Send call notifications to other participants
     for (const participantId of data.participantIds) {
@@ -85,7 +94,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       success: true,
       data: {
         call,
-        meet,
+        meet: session,
         roomName,
       },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -127,14 +136,14 @@ router.post('/:id/answer', async (req: Request, res: Response, next: NextFunctio
       });
     }
 
-    const meet = buildMeetSession(participant.call.livekitRoom, {
-      name: req.user!.displayName,
-    });
+    const meet = await requireMeetIntegration(req.orgId!);
 
     res.json({
       success: true,
       data: {
-        meet,
+        meet: buildMeetSession(meet, participant.call.livekitRoom, {
+          name: req.user!.displayName,
+        }),
         roomName: participant.call.livekitRoom,
       },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -215,10 +224,12 @@ router.post('/:id/join', async (req: Request, res: Response, next: NextFunction)
       });
     }
 
+    const meet = await requireMeetIntegration(req.orgId!);
+
     res.json({
       success: true,
       data: {
-        meet: buildMeetSession(participant.call.livekitRoom, {
+        meet: buildMeetSession(meet, participant.call.livekitRoom, {
           name: req.user!.displayName,
         }),
         roomName: participant.call.livekitRoom,
@@ -242,8 +253,12 @@ router.post('/:id/end', async (req: Request, res: Response, next: NextFunction) 
     });
 
     // Tear the MEET room down too, so anyone still in it is disconnected
-    // rather than left talking to a call NEON considers over. Best-effort.
-    await endMeeting(call.livekitRoom, `neon-${req.userId!}`);
+    // rather than left talking to a call NEON considers over. Best-effort,
+    // and skipped if the integration has since been removed.
+    const meet = await getMeetIntegration(req.orgId!);
+    if (meet) {
+      await endMeeting(meet, call.livekitRoom, `neon-${req.userId!}`);
+    }
 
     await prisma.callParticipant.updateMany({
       where: { callId: req.params.id, status: { in: ['invited', 'joining', 'connected'] } },

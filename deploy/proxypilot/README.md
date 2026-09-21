@@ -74,9 +74,10 @@ Two things about that diagram are load-bearing:
    openssl rand -base64 48   # JWT_SECRET, SESSION_SECRET
    ```
 
-   `MEET_BASE_URL` in `api.env` must be the exact origin the browser loads
-   (it becomes the API's CSP `frame-src` and the postMessage target origin, and
-   both are compared literally). `MEET_API_URL` is server-side only.
+   MEET is not configured in `api.env`. Once the stack is up, an org admin
+   points NEON at its MEET under **Admin → Integrations → MEET** (base URL and
+   API key). The base URL must be the exact origin the browser loads: it
+   becomes the embed's postMessage target origin and is compared literally.
 
    You do **not** write `env/garage.env`; `bootstrap-garage.sh` mints the S3 key
    on the first run and writes it there.
@@ -116,9 +117,10 @@ named Docker volumes (`postgres_data`, `redis_data`, `garage_data`,
 
 `PUBLIC_API_URL` and `PUBLIC_WS_URL` are re-read at container start (the image
 entrypoint writes `/config.js`), so changing them is a restart, not a rebuild.
-The MEET origin is not baked into the bundle at all — the API sends it with
-each call's join response, so pointing NEON at a different MEET is an `api.env`
-change and an API restart.
+The MEET origin is not baked into the bundle or into `api.env` at all — it is
+the organisation's MEET integration (Admin → Integrations), and the API sends
+it with each call's join response. Pointing NEON at a different MEET is a
+dashboard change; nothing restarts.
 
 ## Troubleshooting
 
@@ -137,7 +139,7 @@ tail -f /var/log/neon-deploy.log         # what startup.sh did, and when
   path is proxied verbatim.
 - **The call frame is blank or refuses to load** — MEET is not allowing itself
   to be framed from this origin. Its reverse-proxy route needs `frame-ancestors`
-  to include the NEON origin, and NEON's `MEET_BASE_URL` must match the framed
-  origin exactly.
+  to include the NEON origin, and the base URL saved under Admin → Integrations
+  → MEET must match the framed origin exactly.
 - **Calls connect then freeze** — signalling works, media doesn't. That is
   MEET's media path (its own TCP/UDP forwards), not anything in this stack.

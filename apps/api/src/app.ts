@@ -32,7 +32,6 @@ import { eventsRouter } from './api/events';
 import { featuresRouter } from './api/features';
 import { sharesRouter } from './api/shares';
 import { getS3Status, performHealthCheck } from './services/s3';
-import { getMeetOrigin } from './services/meet';
 
 const config = getConfig();
 
@@ -60,10 +59,12 @@ export function createApp(): Express {
           imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
           connectSrc: ["'self'"],
           mediaSrc: ["'self'", 'blob:'],
-          // Calls are a MEET embed; the WebRTC connection itself is made by
-          // MEET's own document inside the frame, so MEET needs to be framable
-          // but does not need to appear in connect-src.
-          frameSrc: ["'self'", getMeetOrigin()],
+          // This policy covers the API's own responses only — the dashboard
+          // that frames MEET is served by nginx (apps/web/nginx.conf) or Vite,
+          // and MEET's origin is per organisation (the MeetIntegration row),
+          // not a property of this server. Nothing the API serves frames
+          // anything.
+          frameSrc: ["'none'"],
           workerSrc: ["'self'", 'blob:'],
         },
       },
