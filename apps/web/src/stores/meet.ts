@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { adminApi } from '../lib/api';
+import { adminApi, messagesApi } from '../lib/api';
 
 export type MeetViewMode = 'fullscreen' | 'embedded' | 'pip' | 'minimized';
 
@@ -20,6 +20,20 @@ export interface ActiveMeetCall {
   startedAt: number;
   viewMode: MeetViewMode;
   isHost: boolean;
+}
+
+/**
+ * Where the one MEET iframe should be on screen right now, in viewport
+ * pixels. Set by whichever piece of call chrome is mounted (embedded pane,
+ * PiP window, fullscreen, mobile mini view); null means "no chrome is showing
+ * the video" and the frame stays mounted but hidden, so the call and any
+ * screen share survive a minimize or a page change.
+ */
+export interface MeetSlotRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
 }
 
 export interface MeetIntegrationConfig {
@@ -45,6 +59,11 @@ interface MeetState {
   // Chat sidebar visibility during call
   showChatSidebar: boolean;
 
+  // Where the persistent iframe is drawn (see MeetSlotRect); null = hidden.
+  slot: MeetSlotRect | null;
+  // True while ChatPage has the embedded call pane mounted for this call.
+  embeddedMounted: boolean;
+
   // Actions
   fetchConfig: () => Promise<void>;
   clearConfig: () => void;
@@ -65,6 +84,8 @@ interface MeetState {
 
   setViewMode: (mode: MeetViewMode) => void;
   toggleChatSidebar: () => void;
+  setSlot: (slot: MeetSlotRect | null) => void;
+  setEmbeddedMounted: (mounted: boolean) => void;
 
   updateParticipants: (participants: MeetParticipant[]) => void;
 }
@@ -85,6 +106,8 @@ export const useMeetStore = create<MeetState>()(
       joinError: null,
 
       showChatSidebar: false,
+      slot: null,
+      embeddedMounted: false,
 
       fetchConfig: async () => {
         const state = get();
@@ -200,6 +223,21 @@ export const useMeetStore = create<MeetState>()(
             isJoining: false,
             showChatSidebar: false,
           });
+
+          // Tell the other participants. Starting a call creates a MEET room
+          // named after the conversation and nothing else — no ring, no
+          // notification — so without this the other side only finds out by
+          // accident. A message reaches everyone in the conversation over the
+          // socket right away and stays in the history; their own camera
+          // button lands them in the same room. Best-effort: the call is up
+          // whether or not this posts.
+          try {
+            await messagesApi.send(conversationId, {
+              content: '📹 Started a video call — press the camera button in this conversation to join.',
+            });
+          } catch (notifyError) {
+            console.warn('[MeetStore] Could not post the call-started message:', notifyError);
+          }
         } catch (error: any) {
           const errorMsg = error.response?.data?.error?.message || error.message || 'Failed to start call';
           set({
@@ -265,6 +303,8 @@ export const useMeetStore = create<MeetState>()(
           isJoining: false,
           joinError: null,
           showChatSidebar: false,
+          slot: null,
+          embeddedMounted: false,
         });
       },
 
@@ -279,6 +319,28 @@ export const useMeetStore = create<MeetState>()(
 
       toggleChatSidebar: () => {
         set((state) => ({ showChatSidebar: !state.showChatSidebar }));
+      },
+
+      setSlot: (slot) => {
+        const current = get().slot;
+        // Slots are re-measured on every render of the chrome; only a real
+        // move should reach the frame.
+        if (
+          (current === null && slot === null) ||
+          (current &&
+            slot &&
+            current.top === slot.top &&
+            current.left === slot.left &&
+            current.width === slot.width &&
+            current.height === slot.height)
+        ) {
+          return;
+        }
+        set({ slot });
+      },
+
+      setEmbeddedMounted: (embeddedMounted) => {
+        if (get().embeddedMounted !== embeddedMounted) set({ embeddedMounted });
       },
 
       updateParticipants: (participants: MeetParticipant[]) => {
