@@ -122,8 +122,10 @@ services:
   # ---------------------------------------------------------------------------
   # The client reads /config.js at runtime (written by the image entrypoint from
   # these same variables), so a URL change is a restart, not a rebuild. The build
-  # args are the fallback baked into the bundle — VITE_LIVEKIT_URL is read from
-  # import.meta.env in the call pages, so it MUST be correct at build time.
+  # args are the fallback baked into the bundle.
+  #
+  # No VITE_LIVEKIT_URL: the call pages no longer read a media server URL from
+  # the bundle at all — the API sends the MEET room to frame with each join.
   web:
     build:
       context: ../..
@@ -132,14 +134,12 @@ services:
       args:
         VITE_API_URL: ${PUBLIC_API_URL:?PUBLIC_API_URL is required}
         VITE_WS_URL: ${PUBLIC_WS_URL:?PUBLIC_WS_URL is required}
-        VITE_LIVEKIT_URL: ${PUBLIC_LIVEKIT_URL:?PUBLIC_LIVEKIT_URL is required}
         VITE_APP_NAME: ${APP_NAME:-NEON}
     container_name: neon-web
     restart: unless-stopped
     environment:
       VITE_API_URL: ${PUBLIC_API_URL}
       VITE_WS_URL: ${PUBLIC_WS_URL}
-      VITE_LIVEKIT_URL: ${PUBLIC_LIVEKIT_URL}
       VITE_APP_NAME: ${APP_NAME:-NEON}
     ports:
       - "3000:80"
