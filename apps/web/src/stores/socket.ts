@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from './auth';
 import { useChatStore } from './chat';
 import { showMessageNotification, showTestAlertNotification } from './notifications';
-import { useMeetStore, generateRoomName, CALL_ANNOUNCEMENT_PREFIX } from './meet';
+import { useMeetStore, generateRoomName, announcedCallKind } from './meet';
 import { showChatMessageToast } from '../components/ChatMessageToast';
 
 // Get WebSocket URL from runtime config (docker), build-time env, or fallback
@@ -246,19 +246,18 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         // name is derived from the conversation on both sides, so the text
         // alone is enough to ring and to answer into the right room.
         const metadataRoom = message.metadata?.call?.room;
-        const isAnnouncement =
-          typeof message.content === 'string' && message.content.startsWith(CALL_ANNOUNCEMENT_PREFIX);
+        const announcedKind = announcedCallKind(message);
         const callRoom =
           typeof metadataRoom === 'string' && metadataRoom
             ? metadataRoom
-            : isAnnouncement
+            : announcedKind
               ? generateRoomName(message.conversationId)
               : null;
-        if (callRoom) {
+        if (callRoom && announcedKind) {
           useMeetStore.getState().setIncomingCall({
             conversationId: message.conversationId,
             room: callRoom,
-            kind: message.metadata?.call?.kind === 'voice' ? 'voice' : 'video',
+            kind: announcedKind,
             callerId: message.senderId,
             callerName: senderName,
             callerAvatarUrl: message.sender?.avatarUrl,

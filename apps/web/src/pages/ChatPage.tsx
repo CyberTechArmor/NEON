@@ -38,7 +38,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { useChatStore } from '../stores/chat';
 import { useSocketStore } from '../stores/socket';
 import { useAuthStore } from '../stores/auth';
-import { useMeetStore, generateDisplayName } from '../stores/meet';
+import { useMeetStore, generateDisplayName, generateRoomName, announcedCallKind } from '../stores/meet';
 import { PhoneIncoming } from 'lucide-react';
 import { conversationsApi, messagesApi, usersApi, filesApi, getErrorMessage } from '../lib/api';
 import { useFeatureFlags } from '../hooks/useFeatureFlags';
@@ -465,6 +465,48 @@ function ConversationItem({
   );
 }
 
+/**
+ * "Join" on a call announcement from someone else. Same room the ring's
+ * Answer button joins — the announcement carries it, or it is derived from
+ * the conversation — so a dismissed or missed ring is still one click away.
+ */
+function JoinAnnouncedCallButton({ message }: { message: any }) {
+  const activeCall = useMeetStore((state) => state.activeCall);
+  const joinAnnouncedCall = useMeetStore((state) => state.joinAnnouncedCall);
+  const [joining, setJoining] = useState(false);
+
+  const inThisCall = activeCall?.conversationId === message.conversationId;
+  const kind = announcedCallKind(message);
+
+  const handleJoin = async () => {
+    setJoining(true);
+    try {
+      await joinAnnouncedCall({
+        conversationId: message.conversationId,
+        room: message.metadata?.call?.room || generateRoomName(message.conversationId),
+        callerName: message.sender?.displayName || message.sender?.name || 'Call',
+      });
+    } catch (error: any) {
+      toast.error(error?.message || 'Could not join the call');
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleJoin}
+      disabled={joining || !!activeCall}
+      className="mt-2 inline-flex items-center gap-2 min-h-[44px] px-4 rounded-lg bg-neon-success text-neon-bg font-semibold hover:bg-neon-success/80 disabled:opacity-60 disabled:cursor-not-allowed"
+      title={inThisCall ? 'You are in this call' : activeCall ? 'End your current call first' : 'Join this call'}
+    >
+      {joining ? <Loader2 className="w-4 h-4 animate-spin" /> : kind === 'voice' ? <Phone className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+      {inThisCall ? 'In call' : 'Join'}
+    </button>
+  );
+}
+
 // Message component
 function MessageBubble({
   message,
@@ -522,6 +564,7 @@ function MessageBubble({
         <div className="relative">
           <div className={`message-bubble ${isOwn ? 'message-bubble-own' : 'message-bubble-other'}`}>
             {message.content && <p>{message.content}</p>}
+            {!isOwn && announcedCallKind(message) && <JoinAnnouncedCallButton message={message} />}
 
             {/* Attachments */}
             {hasAttachments && richAttachmentsEnabled && (
@@ -1027,6 +1070,7 @@ export default function ChatPage() {
         conversationId,
         participants,
         displayName,
+        kind: voiceOnly ? 'voice' : 'video',
       });
     } catch (error: any) {
       toast.error(error.message || 'Failed to start call');
