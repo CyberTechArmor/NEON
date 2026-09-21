@@ -1,0 +1,3 @@
+# Real environment files hold credentials — only the examples belong in git.
+*.env
+!*.env.example

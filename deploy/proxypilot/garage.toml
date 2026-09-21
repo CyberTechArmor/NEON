@@ -1,0 +1,29 @@
+# =============================================================================
+# Garage S3 storage — production (single node)
+# =============================================================================
+# Credential-free on purpose: rpc_secret and admin_token are supplied through
+# GARAGE_RPC_SECRET / GARAGE_ADMIN_TOKEN, which Garage reads in preference to
+# this file. Keep it that way so this config can stay in git.
+# =============================================================================
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+# Path-style only: the client signs against the public hostname, and ProxyPilot
+# proxies that host straight through without rewriting the path, so SigV4 holds.
+root_domain = ""
+
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.garage.invalid"
+
+[admin]
+api_bind_addr = "[::]:3903"

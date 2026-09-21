@@ -1,0 +1,176 @@
+# =============================================================================
+# NEON — production stack for a ProxyPilot-managed Incus/LXC guest
+# =============================================================================
+# Self-contained (NOT an overlay on docker/docker-compose.yml): that file is a
+# development stack with bind-mounted sources and dev build targets.
+#
+#   docker compose --env-file env/deploy.env -f docker-compose.prod.yml up -d
+#
+# Everything that must differ per install lives in env/ (gitignored) and is
+# written by the operator or by startup.sh; nothing secret belongs in here.
+#
+# Published ports bind inside the guest only. The public edge is ProxyPilot's
+# Caddy, which proxies:
+#   chat.fractionate.ai/          -> web      :3000
+#   chat.fractionate.ai/api       -> api      :3001
+#   chat.fractionate.ai/socket.io -> api      :3001
+#   chat.fractionate.ai/livekit   -> livekit  :7880  (prefix stripped)
+#   neon-s3.fractionate.ai/       -> garage   :3900  (pre-signed S3 URLs)
+# =============================================================================
+
+name: neon
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: neon-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-neon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-neon}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-neon} -d ${POSTGRES_DB:-neon}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - neon
+
+  # ---------------------------------------------------------------------------
+  # Redis — sessions, cache, socket.io pub/sub
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: neon-redis
+    restart: unless-stopped
+    command: >
+      redis-server --appendonly yes
+      --maxmemory 512mb --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - neon
+
+  # ---------------------------------------------------------------------------
+  # Garage — S3-compatible object storage
+  # ---------------------------------------------------------------------------
+  # Secrets come from the environment (GARAGE_RPC_SECRET / GARAGE_ADMIN_TOKEN)
+  # so garage.toml stays checked in and credential-free.
+  garage:
+    build:
+      context: ../../docker/garage
+      dockerfile: Dockerfile
+    container_name: neon-garage
+    restart: unless-stopped
+    environment:
+      GARAGE_CONFIG_FILE: /etc/garage.toml
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?GARAGE_RPC_SECRET is required}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?GARAGE_ADMIN_TOKEN is required}
+    volumes:
+      - garage_data:/var/lib/garage/data
+      - garage_meta:/var/lib/garage/meta
+      - ./garage.toml:/etc/garage.toml:ro
+    ports:
+      - "127.0.0.1:3900:3900"
+    networks:
+      - neon
+
+  # ---------------------------------------------------------------------------
+  # LiveKit — WebRTC SFU
+  # ---------------------------------------------------------------------------
+  # Keys come from LIVEKIT_KEYS ("<api-key>: <api-secret>"), so livekit.yaml
+  # stays checked in and credential-free.
+  livekit:
+    image: livekit/livekit-server:v1.5
+    container_name: neon-livekit
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: ${LIVEKIT_KEYS:?LIVEKIT_KEYS is required}
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"                    # signalling (behind Caddy /livekit)
+      - "7881:7881"                    # ICE/TCP fallback
+      - "50000-50100:50000-50100/udp"  # ICE/UDP media
+    depends_on:
+      - redis
+    networks:
+      - neon
+
+  # ---------------------------------------------------------------------------
+  # NEON API
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+      target: runner
+    container_name: neon-api
+    restart: unless-stopped
+    env_file:
+      - ./env/api.env
+      - ./env/garage.env
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - neon
+
+  # ---------------------------------------------------------------------------
+  # NEON web client
+  # ---------------------------------------------------------------------------
+  # The client reads /config.js at runtime (written by the image entrypoint from
+  # these same variables), so a URL change is a restart, not a rebuild. The build
+  # args are the fallback baked into the bundle — VITE_LIVEKIT_URL is read from
+  # import.meta.env in the call pages, so it MUST be correct at build time.
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      target: runner
+      args:
+        VITE_API_URL: ${PUBLIC_API_URL:?PUBLIC_API_URL is required}
+        VITE_WS_URL: ${PUBLIC_WS_URL:?PUBLIC_WS_URL is required}
+        VITE_LIVEKIT_URL: ${PUBLIC_LIVEKIT_URL:?PUBLIC_LIVEKIT_URL is required}
+        VITE_APP_NAME: ${APP_NAME:-NEON}
+    container_name: neon-web
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${PUBLIC_API_URL}
+      VITE_WS_URL: ${PUBLIC_WS_URL}
+      VITE_LIVEKIT_URL: ${PUBLIC_LIVEKIT_URL}
+      VITE_APP_NAME: ${APP_NAME:-NEON}
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    networks:
+      - neon
+
+volumes:
+  postgres_data:
+  redis_data:
+  garage_data:
+  garage_meta:
+
+networks:
+  neon:
+    driver: bridge

@@ -1,0 +1,38 @@
+# =============================================================================
+# LiveKit — production
+# =============================================================================
+# API keys come from the LIVEKIT_KEYS environment variable ("<key>: <secret>"),
+# never from this file, so it can stay in git.
+#
+# Signalling reaches the SFU through Caddy at https://<domain>/livekit (the
+# prefix is stripped). Media does not go through Caddy: it needs the host to
+# forward 7881/tcp and 50000-50100/udp to this guest, and use_external_ip lets
+# LiveKit advertise the host's public address rather than the guest's 10.x one.
+# =============================================================================
+
+port: 7880
+
+rtc:
+  port_range_start: 50000
+  port_range_end: 50100
+  tcp_port: 7881
+  use_external_ip: true
+
+logging:
+  level: info
+  pion_level: warn
+  json: false
+
+room:
+  enabled_codecs:
+    - mime: audio/opus
+    - mime: video/VP8
+    - mime: video/H264
+  max_participants: 100
+  empty_timeout: 300
+  departure_timeout: 20
+
+# TURN is served by the host edge, not by LiveKit: leaving it off avoids binding
+# 3478/5349 in a guest that cannot obtain its own certificate.
+turn:
+  enabled: false
