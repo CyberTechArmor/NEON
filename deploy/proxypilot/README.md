@@ -43,7 +43,8 @@ Two things about that table are load-bearing:
 | File | Purpose |
 |------|---------|
 | `docker-compose.prod.yml` | The production stack. Standalone, not an overlay. |
-| `startup.sh` | Registered as the guest's ProxyPilot startup script. Idempotent: installs Docker if needed, builds, bootstraps, migrates, starts. |
+| `bootstrap.sh` | Registered as the guest's ProxyPilot startup script. Syncs the checkout, then launches `startup.sh` as the transient `neon-deploy.service` and returns — a full deploy outlasts any tool call that would block on it. |
+| `startup.sh` | The deploy itself. Idempotent: installs Docker if needed, builds, bootstraps, migrates, starts. |
 | `scripts/bootstrap-garage.sh` | First-run Garage cluster layout, access key, buckets, CORS. |
 | `scripts/put-bucket-cors.cjs` | Bucket CORS via the S3 API (Garage has no CLI verb for it). |
 | `garage.toml`, `livekit.yaml` | Service configs, deliberately credential-free — secrets arrive through the environment. |
@@ -79,12 +80,16 @@ Two things about that table are load-bearing:
    You do **not** write `env/garage.env`; `bootstrap-garage.sh` mints the S3 key
    on the first run and writes it there.
 
-3. **Run the startup script** (from ProxyPilot: `rerun_startup`, with a generous
-   `timeout_seconds` — the first build compiles the API and the React bundle):
+3. **Run the deploy** — from ProxyPilot, `rerun_startup`; it returns straight
+   away and the work continues in `neon-deploy.service`. Follow it with:
 
    ```bash
-   ./startup.sh
+   systemctl status neon-deploy
+   journalctl -u neon-deploy -f
    ```
+
+   The first run compiles the API and the React bundle, so give it a few
+   minutes.
 
 4. **Publish the routes** — root, `/api`, `/socket.io`, `/livekit` (stripped),
    and the S3 hostname. See the diagram above for ports.
@@ -97,7 +102,7 @@ Two things about that table are load-bearing:
 `startup.sh` is safe to run again and is the normal way to deploy a change:
 
 ```bash
-git pull && ./startup.sh
+git pull && ./startup.sh        # or, from ProxyPilot, just rerun_startup
 ```
 
 It rebuilds images, re-applies migrations (a no-op when there is nothing new),
