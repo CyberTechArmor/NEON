@@ -68,14 +68,16 @@ chmod 600 "$DEPLOY_ENV" "$API_ENV" "$GARAGE_ENV"
 # -----------------------------------------------------------------------------
 # 3. Build images
 # -----------------------------------------------------------------------------
-log "Building images (api, web, garage) — first build pulls and compiles, expect several minutes"
+log "Building images (api, web) — first build pulls and compiles, expect several minutes"
 "${COMPOSE[@]}" build
 
 # -----------------------------------------------------------------------------
 # 4. Bring up the data plane
 # -----------------------------------------------------------------------------
-log "Starting postgres, redis, garage, livekit"
-"${COMPOSE[@]}" up -d postgres redis garage livekit
+# --remove-orphans clears containers from services this file no longer defines
+# — notably the livekit that used to live here before calls moved to MEET.
+log "Starting postgres, redis, garage"
+"${COMPOSE[@]}" up -d --remove-orphans postgres redis garage
 
 log "Waiting for postgres to report healthy"
 for _ in $(seq 1 60); do
