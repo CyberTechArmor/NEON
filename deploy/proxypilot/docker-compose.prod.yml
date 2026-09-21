@@ -85,7 +85,9 @@ services:
       - garage_meta:/var/lib/garage/meta
       - ./garage.toml:/etc/garage.toml:ro
     ports:
-      - "127.0.0.1:3900:3900"
+      # Reachable from the host, because Caddy proxies neon-s3.<domain> here for
+      # pre-signed URLs — the browser talks to Garage, not to the API.
+      - "3900:3900"
     networks:
       - neon
 
