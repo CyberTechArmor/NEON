@@ -12,10 +12,14 @@
 
 port: 7880
 
+# These are host ports, forwarded straight through to this guest, so they must
+# not collide with another LiveKit or TURN server on the same host. They are
+# also what LiveKit advertises to clients as ICE candidates, which is why the
+# host forward and this file have to name the same numbers.
 rtc:
-  port_range_start: 50000
-  port_range_end: 50100
-  tcp_port: 7881
+  port_range_start: 40000
+  port_range_end: 40100
+  tcp_port: 7891
   use_external_ip: true
 
 logging:

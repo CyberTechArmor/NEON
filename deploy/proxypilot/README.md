@@ -35,8 +35,11 @@ Two things about that table are load-bearing:
   that rewrites it invalidates the signature. That is why object storage gets
   its own hostname rather than a path on the app's.
 - **Media does not go through Caddy.** Only LiveKit *signalling* is proxied.
-  WebRTC media needs host→guest forwards for `7881/tcp` and `50000-50100/udp`,
-  which ProxyPilot manages as Incus proxy devices (`set_port_forward`).
+  WebRTC media needs host→guest forwards for `7891/tcp` and `40000-40100/udp`,
+  which ProxyPilot manages as Incus proxy devices (`set_port_forward`). Those
+  numbers are host-wide and are also what LiveKit advertises as ICE candidates,
+  so `livekit.yaml`, the published ports and the host forwards must all agree —
+  and must not collide with another LiveKit or TURN server on the same host.
 
 ## Files
 
@@ -133,4 +136,5 @@ tail -f /var/log/neon-deploy.log         # what startup.sh did, and when
   (`scripts/put-bucket-cors.cjs`) and that `S3_PUBLIC_ENDPOINT` is a host whose
   path is proxied verbatim.
 - **Calls connect then freeze** — signalling is working and media is not: check
-  the host port forwards for `7881/tcp` and `50000-50100/udp`.
+  the host port forwards for `7891/tcp` and `40000-40100/udp`, and that they
+  match `rtc.tcp_port` / `rtc.port_range_*` in `livekit.yaml`.
