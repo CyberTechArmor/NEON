@@ -2,6 +2,10 @@
 # =============================================================================
 # NEON guest bootstrap — the script registered with ProxyPilot
 # =============================================================================
+# ProxyPilot registers and runs a COPY of this file, at
+# /opt/neon-deploy/startup.sh in the guest. That copy is the one boot runs, so
+# a change here only takes effect once it is written there too.
+#
 # This is the thin half of the deployment. It keeps a checkout of the NEON
 # repository at $SRC in step with $BRANCH and then hands over to startup.sh
 # inside it, so a deploy is "push, then rerun_startup" and the deployment logic

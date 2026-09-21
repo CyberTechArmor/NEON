@@ -2,15 +2,14 @@
 # Multi-stage build for production
 
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies (including openssl for Prisma) and pin npm to the
-# last major that supports this image's Node 20 (npm@latest now resolves to
-# npm 12, which refuses to run on Node 20).
-RUN apk add --no-cache python3 make g++ openssl openssl-dev && \
-    npm install -g npm@10
+# Build dependencies, including openssl for Prisma. The image's bundled npm is
+# used as-is: a global `npm install -g npm@latest` here is what broke this
+# build once already, when npm@latest outran the image's Node.
+RUN apk add --no-cache python3 make g++ openssl openssl-dev
 
 # Copy all package files first for better layer caching
 COPY package*.json ./
@@ -50,13 +49,12 @@ RUN cd packages/database && npm run build
 RUN cd apps/api && npm run build
 
 # Production stage
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
-# Install openssl (required by Prisma) and pin npm (see the builder stage).
-RUN apk add --no-cache openssl && \
-    npm install -g npm@10
+# openssl is required by Prisma. Bundled npm again, see the builder stage.
+RUN apk add --no-cache openssl
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
