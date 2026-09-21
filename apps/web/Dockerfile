@@ -6,8 +6,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Update npm to latest version
-RUN npm install -g npm@latest
+# Pin npm to the last major that supports this image's Node 20 (npm@latest
+# now resolves to npm 12, which refuses to run on Node 20).
+RUN npm install -g npm@10
 
 # Copy all package files first for better layer caching
 COPY package*.json ./

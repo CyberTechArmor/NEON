@@ -6,9 +6,11 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies (including openssl for Prisma) and update npm
+# Install build dependencies (including openssl for Prisma) and pin npm to the
+# last major that supports this image's Node 20 (npm@latest now resolves to
+# npm 12, which refuses to run on Node 20).
 RUN apk add --no-cache python3 make g++ openssl openssl-dev && \
-    npm install -g npm@latest
+    npm install -g npm@10
 
 # Copy all package files first for better layer caching
 COPY package*.json ./
@@ -52,9 +54,9 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Install openssl (required by Prisma) and update npm
+# Install openssl (required by Prisma) and pin npm (see the builder stage).
 RUN apk add --no-cache openssl && \
-    npm install -g npm@latest
+    npm install -g npm@10
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
