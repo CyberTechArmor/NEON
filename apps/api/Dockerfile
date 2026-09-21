@@ -90,9 +90,10 @@ USER neon
 # Expose port
 EXPOSE 3001
 
-# Health check
+# Health check. 127.0.0.1, not localhost: the API binds 0.0.0.0 (IPv4 only), while
+# busybox wget tries the ::1 that localhost also resolves to, and fails there.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3001/api/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3001/api/health || exit 1
 
 # Start the server
 CMD ["node", "apps/api/dist/index.js"]
