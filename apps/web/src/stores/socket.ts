@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from './auth';
 import { useChatStore } from './chat';
 import { showMessageNotification, showTestAlertNotification } from './notifications';
+import { useMeetStore } from './meet';
 
 // Get WebSocket URL from runtime config (docker), build-time env, or fallback
 const getWsUrl = (): string => {
@@ -233,6 +234,29 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       if (!isOwnMessage) {
         const senderName = message.sender?.displayName || message.sender?.name || 'Someone';
         const messageContent = message.content || '[Attachment]';
+
+        // A call announcement rings instead of toasting: the popup with
+        // Dismiss / Answer (MeetProvider) and the conversation card both
+        // read incomingCall. Wherever the user is, including inside that
+        // very conversation, a ring is the right response.
+        const callRoom = message.metadata?.call?.room;
+        if (typeof callRoom === 'string' && callRoom) {
+          useMeetStore.getState().setIncomingCall({
+            conversationId: message.conversationId,
+            room: callRoom,
+            kind: message.metadata.call.kind === 'voice' ? 'voice' : 'video',
+            callerId: message.senderId,
+            callerName: senderName,
+            callerAvatarUrl: message.sender?.avatarUrl,
+            messageId: message.id,
+            receivedAt: Date.now(),
+          });
+          if (!isOnChatPage || !isCurrentConversation) {
+            showMessageNotification(senderName, messageContent, message.conversationId);
+          }
+          set({ lastActivityAt: Date.now() });
+          return;
+        }
 
         // Show in-app toast and browser notification if:
         // 1. User is NOT on the chat page at all, OR

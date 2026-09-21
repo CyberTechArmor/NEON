@@ -473,15 +473,38 @@ router.get('/:id/messages', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
+/** MEET room codes and NEON's conversation-derived room names: letters, digits, dashes. */
+const CALL_ROOM_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
+
+/**
+ * Accept only the metadata shapes NEON itself produces. Anything else is
+ * dropped rather than stored, so a client cannot attach arbitrary JSON to a
+ * message.
+ */
+function parseMessageMetadata(raw: unknown): { call: { room: string; kind: 'video' | 'voice' } } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const call = (raw as { call?: unknown }).call;
+  if (!call || typeof call !== 'object') return undefined;
+  const { room, kind } = call as { room?: unknown; kind?: unknown };
+  if (typeof room !== 'string' || !CALL_ROOM_PATTERN.test(room)) return undefined;
+  return { call: { room, kind: kind === 'voice' ? 'voice' : 'video' } };
+}
+
 /**
  * POST /conversations/:id/messages
  * Send a message to a conversation
  */
 router.post('/:id/messages', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { content, replyToId, type = 'TEXT', fileIds } = req.body;
+    const { content, replyToId, type = 'TEXT', fileIds, metadata: rawMetadata } = req.body;
     const hasFiles = Array.isArray(fileIds) && fileIds.length > 0;
     const messageContent = content?.trim() || '';
+
+    // Structured metadata is opt-in and allowlisted. Today there is one
+    // shape: a call announcement. `metadata.call.room` is the MEET room the
+    // sender is in, so the other participants' clients can ring, and answer
+    // straight into that room, without parsing the message text.
+    const messageMetadata = parseMessageMetadata(rawMetadata);
 
     // Require either content or files
     if (!messageContent && !hasFiles) {
@@ -561,6 +584,7 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
         type: messageType,
         content: messageContent,
         replyToId,
+        metadata: messageMetadata,
         // Create MessageFile records
         files: hasFiles ? {
           create: validFiles.map((file, index) => ({

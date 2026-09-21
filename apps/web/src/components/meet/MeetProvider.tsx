@@ -1,7 +1,8 @@
 import { useEffect, ReactNode } from 'react';
-import { useMeetStore } from '../../stores/meet';
+import { useMeetStore, INCOMING_CALL_TIMEOUT_MS } from '../../stores/meet';
 import { MeetCall, MobileMeetPip } from './MeetCall';
 import { MeetFrame } from './MeetFrame';
+import { IncomingCallToast } from './IncomingCallToast';
 import { useAuthStore } from '../../stores/auth';
 
 interface MeetProviderProps {
@@ -21,8 +22,17 @@ interface MeetProviderProps {
  *    call is never both invisible and unreachable.
  */
 export function MeetProvider({ children }: MeetProviderProps) {
-  const { activeCall, embeddedMounted, fetchConfig, clearConfig } = useMeetStore();
+  const { activeCall, embeddedMounted, incomingCall, dismissIncomingCall, fetchConfig, clearConfig } =
+    useMeetStore();
   const { isAuthenticated } = useAuthStore();
+
+  // A ring that nobody answers stops on its own.
+  useEffect(() => {
+    if (!incomingCall) return;
+    const remaining = Math.max(0, incomingCall.receivedAt + INCOMING_CALL_TIMEOUT_MS - Date.now());
+    const timer = setTimeout(dismissIncomingCall, remaining);
+    return () => clearTimeout(timer);
+  }, [incomingCall, dismissIncomingCall]);
 
   // Fetch MEET config when user is authenticated
   useEffect(() => {
@@ -42,6 +52,8 @@ export function MeetProvider({ children }: MeetProviderProps) {
   return (
     <>
       {children}
+
+      {incomingCall && <IncomingCallToast />}
 
       {activeCall && (
         <>

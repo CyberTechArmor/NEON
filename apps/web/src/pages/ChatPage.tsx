@@ -39,6 +39,7 @@ import { useChatStore } from '../stores/chat';
 import { useSocketStore } from '../stores/socket';
 import { useAuthStore } from '../stores/auth';
 import { useMeetStore, generateDisplayName } from '../stores/meet';
+import { PhoneIncoming } from 'lucide-react';
 import { conversationsApi, messagesApi, usersApi, filesApi, getErrorMessage } from '../lib/api';
 import { useFeatureFlags } from '../hooks/useFeatureFlags';
 import { AttachmentRenderer } from '../components/attachments';
@@ -311,6 +312,8 @@ function ConversationItem({
 }) {
   const { presence, isConnected, lastActivityAt } = useSocketStore();
   const { user } = useAuthStore();
+  const incomingCall = useMeetStore((state) => state.incomingCall);
+  const isRinging = incomingCall?.conversationId === conversation.id;
 
   // For direct messages, get the other participant
   const otherParticipant =
@@ -386,12 +389,13 @@ function ConversationItem({
   return (
     <button
       className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors
-        ${isActive ? 'bg-neon-surface-hover' : 'hover:bg-neon-surface-hover/50'}`}
+        ${isActive ? 'bg-neon-surface-hover' : 'hover:bg-neon-surface-hover/50'}
+        ${isRinging ? 'ring-1 ring-neon-success/60 bg-neon-success/5' : ''}`}
       onClick={onClick}
     >
       {/* Avatar */}
       <div className="relative flex-shrink-0">
-        <div className="avatar avatar-md">
+        <div className={`avatar avatar-md ${isRinging ? 'ring-2 ring-neon-success animate-pulse' : ''}`}>
           {avatar ? (
             <img src={avatar} alt={displayName} className="w-full h-full object-cover" />
           ) : (
@@ -426,19 +430,30 @@ function ConversationItem({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {/* Message indicator dot */}
-          {indicatorColor && (
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${indicatorColor}`} />
+          {isRinging ? (
+            <>
+              <PhoneIncoming className="w-4 h-4 text-neon-success animate-bounce flex-shrink-0" />
+              <span className="text-sm truncate flex-1 font-semibold text-neon-success">
+                Incoming {incomingCall?.kind === 'voice' ? 'call' : 'video call'}…
+              </span>
+            </>
+          ) : (
+            <>
+              {/* Message indicator dot */}
+              {indicatorColor && (
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${indicatorColor}`} />
+              )}
+              <span className={`text-sm truncate flex-1 ${
+                conversation.unreadCount > 0
+                  ? 'font-semibold text-white'
+                  : isLastMessageRead
+                    ? 'text-neon-text-muted italic'
+                    : 'text-neon-text-secondary'
+              }`}>
+                {getLastMessagePreview()}
+              </span>
+            </>
           )}
-          <span className={`text-sm truncate flex-1 ${
-            conversation.unreadCount > 0
-              ? 'font-semibold text-white'
-              : isLastMessageRead
-                ? 'text-neon-text-muted italic'
-                : 'text-neon-text-secondary'
-          }`}>
-            {getLastMessagePreview()}
-          </span>
           {conversation.unreadCount > 0 && (
             <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-xs font-medium bg-white text-neon-bg rounded-full">
               {conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}

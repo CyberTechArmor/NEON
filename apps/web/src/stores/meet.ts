@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { adminApi, messagesApi } from '../lib/api';
+import { useAuthStore } from './auth';
 
 export type MeetViewMode = 'fullscreen' | 'embedded' | 'pip' | 'minimized';
 
@@ -36,6 +37,26 @@ export interface MeetSlotRect {
   height: number;
 }
 
+/**
+ * Someone in a conversation has started a call and this user has not
+ * answered or dismissed it yet. Set from the socket when a call-announcement
+ * message arrives; drives the ringing popup and the conversation card.
+ */
+export interface IncomingCall {
+  conversationId: string;
+  /** The MEET room the caller is in — answering joins this exact room. */
+  room: string;
+  kind: 'video' | 'voice';
+  callerId: string;
+  callerName: string;
+  callerAvatarUrl?: string;
+  messageId: string;
+  receivedAt: number;
+}
+
+/** How long a call keeps ringing before the popup gives up on its own. */
+export const INCOMING_CALL_TIMEOUT_MS = 60 * 1000;
+
 export interface MeetIntegrationConfig {
   configured: boolean;
   enabled: boolean;
@@ -64,6 +85,9 @@ interface MeetState {
   // True while ChatPage has the embedded call pane mounted for this call.
   embeddedMounted: boolean;
 
+  // A call ringing for this user (see IncomingCall); null when none.
+  incomingCall: IncomingCall | null;
+
   // Actions
   fetchConfig: () => Promise<void>;
   clearConfig: () => void;
@@ -78,7 +102,14 @@ interface MeetState {
     roomName: string;
     displayName: string;
     conversationId?: string;
+    /** What the call chrome calls this call; defaults to displayName. */
+    title?: string;
   }) => Promise<void>;
+
+  setIncomingCall: (call: IncomingCall | null) => void;
+  /** Join the ringing call's room. The caller navigates to the conversation itself. */
+  answerIncomingCall: () => Promise<void>;
+  dismissIncomingCall: () => void;
 
   endCall: () => void;
 
@@ -108,6 +139,7 @@ export const useMeetStore = create<MeetState>()(
       showChatSidebar: false,
       slot: null,
       embeddedMounted: false,
+      incomingCall: null,
 
       fetchConfig: async () => {
         const state = get();
@@ -227,16 +259,24 @@ export const useMeetStore = create<MeetState>()(
           // Tell the other participants. Starting a call creates a MEET room
           // named after the conversation and nothing else — no ring, no
           // notification — so without this the other side only finds out by
-          // accident. A message reaches everyone in the conversation over the
-          // socket right away and stays in the history; their own camera
-          // button lands them in the same room. Best-effort: the call is up
-          // whether or not this posts.
+          // accident. The message reaches everyone in the conversation over
+          // the socket right away and stays in the history; its `call`
+          // metadata is what makes their client ring and lets "Answer" join
+          // this exact room. Best-effort: the call is up whether or not this
+          // posts.
           try {
             await messagesApi.send(conversationId, {
-              content: '📹 Started a video call — press the camera button in this conversation to join.',
+              content: '📹 Started a video call — answer the ring, or press the camera button in this conversation to join.',
+              metadata: { call: { room: roomName, kind: 'video' } },
             });
           } catch (notifyError) {
             console.warn('[MeetStore] Could not post the call-started message:', notifyError);
+          }
+
+          // Pressing the camera button in a conversation that is ringing IS
+          // answering it.
+          if (get().incomingCall?.conversationId === conversationId) {
+            set({ incomingCall: null });
           }
         } catch (error: any) {
           const errorMsg = error.response?.data?.error?.message || error.message || 'Failed to start call';
@@ -248,7 +288,7 @@ export const useMeetStore = create<MeetState>()(
         }
       },
 
-      joinCall: async ({ roomName, displayName, conversationId }) => {
+      joinCall: async ({ roomName, displayName, conversationId, title }) => {
         const state = get();
 
         // Ensure config is loaded
@@ -277,7 +317,7 @@ export const useMeetStore = create<MeetState>()(
           set({
             activeCall: {
               roomName,
-              displayName,
+              displayName: title || displayName,
               joinUrl: url.toString(),
               baseUrl,
               conversationId,
@@ -295,6 +335,33 @@ export const useMeetStore = create<MeetState>()(
             joinError: error.response?.data?.error?.message || error.message || 'Failed to join call',
           });
         }
+      },
+
+      setIncomingCall: (call) => {
+        // Already in a call in that conversation: nothing to ring about.
+        if (call && get().activeCall?.conversationId === call.conversationId) return;
+        set({ incomingCall: call });
+      },
+
+      answerIncomingCall: async () => {
+        const call = get().incomingCall;
+        if (!call) return;
+        set({ incomingCall: null });
+
+        const me = useAuthStore.getState().user;
+        await get().joinCall({
+          roomName: call.room,
+          displayName: me?.name || 'Guest',
+          conversationId: call.conversationId,
+          title: call.callerName,
+        });
+
+        const error = get().joinError;
+        if (error) throw new Error(error);
+      },
+
+      dismissIncomingCall: () => {
+        set({ incomingCall: null });
       },
 
       endCall: () => {
