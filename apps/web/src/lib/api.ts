@@ -170,7 +170,10 @@ export const messagesApi = {
   list: (conversationId: string, params?: { before?: string; limit?: number }) =>
     api.get<ApiResponse<unknown[]>>(`/conversations/${conversationId}/messages`, { params }),
 
-  send: (conversationId: string, data: { content: string; replyToId?: string; fileIds?: string[] }) =>
+  send: (
+    conversationId: string,
+    data: { content: string; replyToId?: string; fileIds?: string[]; metadata?: { call: { room: string; kind?: 'video' | 'voice' } } }
+  ) =>
     api.post<ApiResponse<unknown>>(`/conversations/${conversationId}/messages`, data),
 
   update: (id: string, content: string) =>

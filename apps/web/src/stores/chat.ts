@@ -6,6 +6,8 @@ interface Message {
   senderId: string;
   content: string;
   type: 'text' | 'file' | 'image' | 'video' | 'audio' | 'system';
+  /** Structured extras. `call` marks a call announcement and names the MEET room. */
+  metadata?: { call?: { room: string; kind?: 'video' | 'voice' } } | null;
   createdAt: string;
   updatedAt: string;
   editedAt?: string;
