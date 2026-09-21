@@ -73,7 +73,7 @@ services:
   # build time, which the build network cannot reach here; the upstream image is
   # the same binary without that dependency.
   garage:
-    image: dxflrs/garage:v0.9.4
+    image: dxflrs/garage:v1.1.0
     container_name: neon-garage
     restart: unless-stopped
     environment:
