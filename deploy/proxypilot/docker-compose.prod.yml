@@ -69,10 +69,11 @@ services:
   # ---------------------------------------------------------------------------
   # Secrets come from the environment (GARAGE_RPC_SECRET / GARAGE_ADMIN_TOKEN)
   # so garage.toml stays checked in and credential-free.
+  # docker/garage/Dockerfile downloads the binary from garagehq.deuxfleurs.fr at
+  # build time, which the build network cannot reach here; the upstream image is
+  # the same binary without that dependency.
   garage:
-    build:
-      context: ../../docker/garage
-      dockerfile: Dockerfile
+    image: dxflrs/garage:v0.9.4
     container_name: neon-garage
     restart: unless-stopped
     environment:

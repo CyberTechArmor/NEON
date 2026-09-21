@@ -20,7 +20,8 @@ COMPOSE_FILE="$3"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 COMPOSE=(docker compose --env-file "$DEPLOY_ENV" -f "$COMPOSE_FILE")
-G=("${COMPOSE[@]}" exec -T garage /usr/local/bin/garage)
+# The upstream image ships the binary at /garage with no shell around it.
+G=("${COMPOSE[@]}" exec -T garage /garage)
 
 log() { echo "[garage $(date -u +%H:%M:%S)] $*"; }
 
