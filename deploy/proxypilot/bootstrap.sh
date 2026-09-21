@@ -57,7 +57,7 @@ if [ "${NEON_DEPLOY_DETACH:-1}" = "1" ] && command -v systemd-run >/dev/null 2>&
     log "neon-deploy.service is already running — leaving it alone"
     exit 0
   fi
-  systemd-run --unit=neon-deploy --description="NEON deploy" \
+  systemd-run --no-block --unit=neon-deploy --description="NEON deploy" \
     --property=Type=oneshot --property=TimeoutStartSec=3600 \
     --setenv=NEON_DEPLOY_DETACH=0 \
     "$DEPLOY/startup.sh" >/dev/null

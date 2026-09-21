@@ -25,8 +25,8 @@ api_bind_addr = "[::]:3900"
 # request is path-style. Pre-signed URLs are signed against the public hostname
 # with the bucket in the path, and ProxyPilot proxies that path verbatim.
 
-[s3_web]
-bind_addr = "[::]:3902"
+# No [s3_web] section: the static-website endpoint is unused, and in 1.x the
+# section is invalid without a root_domain.
 
 [admin]
 api_bind_addr = "[::]:3903"

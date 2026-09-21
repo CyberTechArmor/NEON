@@ -30,7 +30,6 @@ room:
     - mime: video/H264
   max_participants: 100
   empty_timeout: 300
-  departure_timeout: 20
 
 # TURN is served by the host edge, not by LiveKit: leaving it off avoids binding
 # 3478/5349 in a guest that cannot obtain its own certificate.
