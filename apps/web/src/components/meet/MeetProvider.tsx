@@ -1,4 +1,6 @@
 import { useEffect, ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { registerNavigator } from '../../lib/navigation';
 import { useMeetStore, INCOMING_CALL_TIMEOUT_MS } from '../../stores/meet';
 import { MeetCall, MobileMeetPip } from './MeetCall';
 import { MeetFrame } from './MeetFrame';
@@ -25,6 +27,13 @@ export function MeetProvider({ children }: MeetProviderProps) {
   const { activeCall, embeddedMounted, incomingCall, dismissIncomingCall, fetchConfig, clearConfig } =
     useMeetStore();
   const { isAuthenticated } = useAuthStore();
+  const navigate = useNavigate();
+
+  // Let stores and socket handlers navigate (toast clicks, Answer).
+  useEffect(() => {
+    registerNavigator((to) => navigate(to));
+    return () => registerNavigator(null);
+  }, [navigate]);
 
   // A ring that nobody answers stops on its own.
   useEffect(() => {

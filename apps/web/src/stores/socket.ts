@@ -4,7 +4,8 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from './auth';
 import { useChatStore } from './chat';
 import { showMessageNotification, showTestAlertNotification } from './notifications';
-import { useMeetStore } from './meet';
+import { useMeetStore, generateRoomName, CALL_ANNOUNCEMENT_PREFIX } from './meet';
+import { showChatMessageToast } from '../components/ChatMessageToast';
 
 // Get WebSocket URL from runtime config (docker), build-time env, or fallback
 const getWsUrl = (): string => {
@@ -239,12 +240,25 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         // Dismiss / Answer (MeetProvider) and the conversation card both
         // read incomingCall. Wherever the user is, including inside that
         // very conversation, a ring is the right response.
-        const callRoom = message.metadata?.call?.room;
-        if (typeof callRoom === 'string' && callRoom) {
+        //
+        // The room comes from the message's call metadata. A caller on an
+        // older bundle sends the announcement text without it; the room
+        // name is derived from the conversation on both sides, so the text
+        // alone is enough to ring and to answer into the right room.
+        const metadataRoom = message.metadata?.call?.room;
+        const isAnnouncement =
+          typeof message.content === 'string' && message.content.startsWith(CALL_ANNOUNCEMENT_PREFIX);
+        const callRoom =
+          typeof metadataRoom === 'string' && metadataRoom
+            ? metadataRoom
+            : isAnnouncement
+              ? generateRoomName(message.conversationId)
+              : null;
+        if (callRoom) {
           useMeetStore.getState().setIncomingCall({
             conversationId: message.conversationId,
             room: callRoom,
-            kind: message.metadata.call.kind === 'voice' ? 'voice' : 'video',
+            kind: message.metadata?.call?.kind === 'voice' ? 'voice' : 'video',
             callerId: message.senderId,
             callerName: senderName,
             callerAvatarUrl: message.sender?.avatarUrl,
@@ -263,14 +277,11 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         // 2. User is on the chat page but viewing a different conversation
         if (!isOnChatPage || !isCurrentConversation) {
           const messagePreview = messageContent.substring(0, 50);
-          toast(
-            `${senderName}: ${messagePreview}${messageContent.length > 50 ? '...' : ''}`,
-            {
-              icon: '💬',
-              duration: 4000,
-              position: 'top-right',
-            }
-          );
+          showChatMessageToast({
+            senderName,
+            preview: `${messagePreview}${messageContent.length > 50 ? '...' : ''}`,
+            conversationId: message.conversationId,
+          });
 
           // Show sound + browser notification (handled by notification store settings)
           // Only show when user is NOT active on this chat
