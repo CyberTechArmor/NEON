@@ -14,8 +14,11 @@
 #   chat.fractionate.ai/          -> web      :3000
 #   chat.fractionate.ai/api       -> api      :3001
 #   chat.fractionate.ai/socket.io -> api      :3001
-#   chat.fractionate.ai/livekit   -> livekit  :7880  (prefix stripped)
 #   neon-s3.fractionate.ai/       -> garage   :3900  (pre-signed S3 URLs)
+#
+# There is no SFU here. Calls and meetings are hosted by a separate MEET
+# deployment which the client embeds, so no LiveKit service, no signalling
+# route, and no media port forwards belong to this stack.
 # =============================================================================
 
 name: neon
@@ -88,29 +91,6 @@ services:
       # Reachable from the host, because Caddy proxies neon-s3.<domain> here for
       # pre-signed URLs — the browser talks to Garage, not to the API.
       - "3900:3900"
-    networks:
-      - neon
-
-  # ---------------------------------------------------------------------------
-  # LiveKit — WebRTC SFU
-  # ---------------------------------------------------------------------------
-  # Keys come from LIVEKIT_KEYS ("<api-key>: <api-secret>"), so livekit.yaml
-  # stays checked in and credential-free.
-  livekit:
-    image: livekit/livekit-server:v1.5
-    container_name: neon-livekit
-    restart: unless-stopped
-    command: --config /etc/livekit.yaml
-    environment:
-      LIVEKIT_KEYS: ${LIVEKIT_KEYS:?LIVEKIT_KEYS is required}
-    volumes:
-      - ./livekit.yaml:/etc/livekit.yaml:ro
-    ports:
-      - "7880:7880"                    # signalling (behind Caddy /livekit)
-      - "7891:7891"                    # ICE/TCP fallback
-      - "40000-40100:40000-40100/udp"  # ICE/UDP media
-    depends_on:
-      - redis
     networks:
       - neon
 

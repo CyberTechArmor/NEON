@@ -77,13 +77,19 @@ const configSchema = z.object({
     forcePathStyle: z.coerce.boolean().default(true),
   }),
 
-  // LiveKit
-  livekit: z.object({
-    url: z.string().default('ws://localhost:7880'),
-    apiUrl: z.string().default('http://localhost:7880'),
-    apiKey: z.string(),
-    apiSecret: z.string(),
-    recordingEnabled: z.coerce.boolean().default(true),
+  // MEET (video/audio)
+  //
+  // NEON does not run its own SFU. Calls and meetings are hosted by a MEET
+  // deployment (github.com/CyberTechArmor/MEET) and embedded in the client,
+  // so there is no LiveKit URL, API key or secret here: MEET issues the
+  // LiveKit token to the browser itself when the embed joins.
+  meet: z.object({
+    // Public origin of the MEET SPA — what the iframe points at, and the
+    // origin the embed's postMessage traffic must come from.
+    baseUrl: z.string().url().default('http://localhost:3002'),
+    // MEET's REST API base, used server-side for room codes and ending a
+    // meeting. May be an internal address; it is never sent to the browser.
+    apiUrl: z.string().url().default('http://localhost:8080'),
   }),
 
   // Push Notifications
@@ -219,12 +225,9 @@ function loadConfig() {
       forcePathStyle: env.S3_FORCE_PATH_STYLE,
     },
 
-    livekit: {
-      url: env.LIVEKIT_URL,
-      apiUrl: env.LIVEKIT_API_URL,
-      apiKey: env.LIVEKIT_API_KEY,
-      apiSecret: env.LIVEKIT_API_SECRET,
-      recordingEnabled: env.LIVEKIT_RECORDING_ENABLED,
+    meet: {
+      baseUrl: env.MEET_BASE_URL,
+      apiUrl: env.MEET_API_URL,
     },
 
     push: {

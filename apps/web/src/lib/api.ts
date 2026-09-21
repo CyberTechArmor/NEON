@@ -198,6 +198,17 @@ export const usersApi = {
     api.patch('/users/me/settings', { settings }),
 };
 
+/**
+ * Everything the client needs to embed one MEET room. There is no token here
+ * by design — MEET issues the media token to the iframe itself, so NEON never
+ * handles one.
+ */
+export interface MeetSession {
+  url: string;
+  room: string;
+  origin: string;
+}
+
 export const meetingsApi = {
   list: (params?: { page?: number; limit?: number; status?: string }) =>
     api.get<ApiResponse<unknown[]>>('/meetings', { params }),
@@ -213,17 +224,28 @@ export const meetingsApi = {
   delete: (id: string) => api.delete(`/meetings/${id}`),
 
   join: (id: string) =>
-    api.post<ApiResponse<{ token: string; url: string }>>(`/meetings/${id}/join`),
+    api.post<ApiResponse<{ meeting: unknown; meet: MeetSession; roomName: string }>>(
+      `/meetings/${id}/join`
+    ),
 
   leave: (id: string) => api.post(`/meetings/${id}/leave`),
 };
 
+
 export const callsApi = {
   initiate: (participantIds: string[], type: 'audio' | 'video') =>
-    api.post<ApiResponse<{ callId: string; token: string; roomName: string }>>('/calls', { participantIds, type }),
+    api.post<ApiResponse<{ call: { id: string }; meet: MeetSession; roomName: string }>>('/calls', {
+      participantIds,
+      type,
+    }),
 
   join: (id: string) =>
-    api.post<ApiResponse<{ token: string; roomName: string }>>(`/calls/${id}/join`),
+    api.post<ApiResponse<{ meet: MeetSession; roomName: string }>>(`/calls/${id}/join`),
+
+  answer: (id: string) =>
+    api.post<ApiResponse<{ meet: MeetSession; roomName: string }>>(`/calls/${id}/answer`),
+
+  decline: (id: string) => api.post(`/calls/${id}/decline`),
 
   end: (id: string) => api.post(`/calls/${id}/end`),
 };

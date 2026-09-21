@@ -17,29 +17,27 @@ a public address; ProxyPilot's Caddy is the only edge, and it terminates TLS.
   chat.fractionate.ai/          ──▶  guest:3000   web (nginx + SPA)
   chat.fractionate.ai/api       ──▶  guest:3001   api (Express)
   chat.fractionate.ai/socket.io ──▶  guest:3001   api (Socket.io)
-  chat.fractionate.ai/livekit   ──▶  guest:7880   livekit  (prefix stripped)
   neon-s3.fractionate.ai/       ──▶  guest:3900   garage   (path preserved)
 
                  guest (Docker network "neon")
   web ─┬─▶ api ─┬─▶ postgres
        │        ├─▶ redis
-       │        ├─▶ garage
-       │        └─▶ livekit
+       │        └─▶ garage
+       │
+       └─▶ (iframe) ──▶ meet.fractionate.ai   — a separate MEET deployment
 ```
 
-Two things about that table are load-bearing:
+Two things about that diagram are load-bearing:
 
-- **`/livekit` is stripped, `neon-s3` is not.** The LiveKit client SDK appends
-  its own paths to the server URL, so a stripped prefix is transparent to it.
-  Pre-signed S3 URLs are the opposite case: SigV4 covers the path, so anything
-  that rewrites it invalidates the signature. That is why object storage gets
-  its own hostname rather than a path on the app's.
-- **Media does not go through Caddy.** Only LiveKit *signalling* is proxied.
-  WebRTC media needs host→guest forwards for `7891/tcp` and `40000-40100/udp`,
-  which ProxyPilot manages as Incus proxy devices (`set_port_forward`). Those
-  numbers are host-wide and are also what LiveKit advertises as ICE candidates,
-  so `livekit.yaml`, the published ports and the host forwards must all agree —
-  and must not collide with another LiveKit or TURN server on the same host.
+- **There is no SFU in this stack.** Calls and meetings are MEET rooms, framed
+  by the NEON client and driven over MEET's postMessage bridge. NEON mints a
+  room code and builds a join URL; MEET issues the media token to the iframe
+  itself. So nothing here terminates WebRTC, and no media ports are forwarded
+  to this guest — that is MEET's deployment's job, not NEON's.
+- **`neon-s3` keeps its path.** Pre-signed S3 URLs are signed with SigV4, which
+  covers the URL path, so anything that rewrites the path in transit
+  invalidates the signature. That is why object storage gets its own hostname
+  rather than a path on the app's.
 
 ## Files
 
@@ -50,7 +48,7 @@ Two things about that table are load-bearing:
 | `startup.sh` | The deploy itself. Idempotent: installs Docker if needed, builds, bootstraps, migrates, starts. |
 | `scripts/bootstrap-garage.sh` | First-run Garage cluster layout, access key, buckets, CORS. |
 | `scripts/put-bucket-cors.cjs` | Bucket CORS via the S3 API (Garage has no CLI verb for it). |
-| `garage.toml`, `livekit.yaml` | Service configs, deliberately credential-free — secrets arrive through the environment. |
+| `garage.toml` | Garage's config, deliberately credential-free — secrets arrive through the environment. |
 | `env/*.env.example` | Templates. The real `env/*.env` are gitignored. |
 
 ## First deployment
@@ -76,9 +74,9 @@ Two things about that table are load-bearing:
    openssl rand -base64 48   # JWT_SECRET, SESSION_SECRET
    ```
 
-   `LIVEKIT_KEYS` in `deploy.env` and `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` in
-   `api.env` are the same pair, written two ways — keep them in step or calls
-   fail to authenticate.
+   `MEET_BASE_URL` in `api.env` must be the exact origin the browser loads
+   (it becomes the API's CSP `frame-src` and the postMessage target origin, and
+   both are compared literally). `MEET_API_URL` is server-side only.
 
    You do **not** write `env/garage.env`; `bootstrap-garage.sh` mints the S3 key
    on the first run and writes it there.
@@ -94,8 +92,10 @@ Two things about that table are load-bearing:
    The first run compiles the API and the React bundle, so give it a few
    minutes.
 
-4. **Publish the routes** — root, `/api`, `/socket.io`, `/livekit` (stripped),
-   and the S3 hostname. See the diagram above for ports.
+4. **Publish the routes** — root, `/api`, `/socket.io`, and the S3 hostname.
+   See the diagram above for ports. MEET is reached directly by the browser at
+   its own hostname, so it needs no route here — but its route must allow
+   framing from this app's origin.
 
 5. **Sign in** as `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `api.env` and change the
    password.
@@ -114,11 +114,11 @@ containers. The seed is a no-op once an organization row exists. Data lives in
 named Docker volumes (`postgres_data`, `redis_data`, `garage_data`,
 `garage_meta`) and is untouched.
 
-Changing a public URL is the one case that needs care: `PUBLIC_API_URL` and
-`PUBLIC_WS_URL` are re-read at container start (the image entrypoint writes
-`/config.js`), but `PUBLIC_LIVEKIT_URL` is read from `import.meta.env` inside
-the call pages and is therefore baked into the bundle — change it and rebuild
-the web image.
+`PUBLIC_API_URL` and `PUBLIC_WS_URL` are re-read at container start (the image
+entrypoint writes `/config.js`), so changing them is a restart, not a rebuild.
+The MEET origin is not baked into the bundle at all — the API sends it with
+each call's join response, so pointing NEON at a different MEET is an `api.env`
+change and an API restart.
 
 ## Troubleshooting
 
@@ -135,6 +135,9 @@ tail -f /var/log/neon-deploy.log         # what startup.sh did, and when
 - **Uploads fail in the browser but work from the API** — check bucket CORS
   (`scripts/put-bucket-cors.cjs`) and that `S3_PUBLIC_ENDPOINT` is a host whose
   path is proxied verbatim.
-- **Calls connect then freeze** — signalling is working and media is not: check
-  the host port forwards for `7891/tcp` and `40000-40100/udp`, and that they
-  match `rtc.tcp_port` / `rtc.port_range_*` in `livekit.yaml`.
+- **The call frame is blank or refuses to load** — MEET is not allowing itself
+  to be framed from this origin. Its reverse-proxy route needs `frame-ancestors`
+  to include the NEON origin, and NEON's `MEET_BASE_URL` must match the framed
+  origin exactly.
+- **Calls connect then freeze** — signalling works, media doesn't. That is
+  MEET's media path (its own TCP/UDP forwards), not anything in this stack.

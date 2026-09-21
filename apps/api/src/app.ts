@@ -32,6 +32,7 @@ import { eventsRouter } from './api/events';
 import { featuresRouter } from './api/features';
 import { sharesRouter } from './api/shares';
 import { getS3Status, performHealthCheck } from './services/s3';
+import { getMeetOrigin } from './services/meet';
 
 const config = getConfig();
 
@@ -57,13 +58,16 @@ export function createApp(): Express {
           styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com', 'https://fonts.googleapis.com'],
           fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
           imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-          connectSrc: ["'self'", config.livekit.url],
+          connectSrc: ["'self'"],
           mediaSrc: ["'self'", 'blob:'],
-          frameSrc: ["'none'"],
+          // Calls are a MEET embed; the WebRTC connection itself is made by
+          // MEET's own document inside the frame, so MEET needs to be framable
+          // but does not need to appear in connect-src.
+          frameSrc: ["'self'", getMeetOrigin()],
           workerSrc: ["'self'", 'blob:'],
         },
       },
-      crossOriginEmbedderPolicy: false, // Required for LiveKit
+      crossOriginEmbedderPolicy: false, // the MEET embed is cross-origin
     })
   );
 
@@ -363,7 +367,7 @@ export function createApp(): Express {
   // Admin
   apiRouter.use('/admin', adminRouter);
 
-  // Webhooks (for LiveKit, etc.)
+  // Webhooks
   apiRouter.use('/webhooks', webhooksRouter);
 
   // Events API (for real-time event publishing via API key / webhooks)

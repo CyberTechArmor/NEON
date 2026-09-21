@@ -1,157 +1,27 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import {
-  LiveKitRoom,
-  VideoConference,
-  RoomAudioRenderer,
-  ControlBar,
-  useTracks,
-  ParticipantTile,
-  useParticipants,
-  useLocalParticipant,
-} from '@livekit/components-react';
-import { Track, Room, RoomEvent } from 'livekit-client';
 import toast from 'react-hot-toast';
-import {
-  Loader2,
-  PhoneOff,
-  Mic,
-  MicOff,
-  Video,
-  VideoOff,
-  ScreenShare,
-  ScreenShareOff,
-  Users,
-  MessageSquare,
-  Settings,
-} from 'lucide-react';
+import { Loader2, PhoneOff, Users } from 'lucide-react';
 import { callsApi, getErrorMessage } from '../lib/api';
-import '@livekit/components-styles';
+import { MeetEmbed, MeetEmbedHandle, MeetLeaveReason } from '../components/MeetEmbed';
 
-// Custom video grid component
-function VideoGrid() {
-  const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare]);
-  const participants = useParticipants();
-
-  if (tracks.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-full text-neon-text-muted">
-        <p>Waiting for participants to enable video...</p>
-      </div>
-    );
-  }
-
-  const gridCols =
-    tracks.length === 1
-      ? 'grid-cols-1'
-      : tracks.length === 2
-      ? 'grid-cols-2'
-      : tracks.length <= 4
-      ? 'grid-cols-2'
-      : tracks.length <= 6
-      ? 'grid-cols-3'
-      : 'grid-cols-4';
-
-  return (
-    <div className={`grid ${gridCols} gap-4 h-full p-4`}>
-      {tracks.map((track) => (
-        <ParticipantTile
-          key={track.participant.identity + track.source}
-          trackRef={track}
-          className="rounded-xl overflow-hidden bg-neon-surface"
-        />
-      ))}
-    </div>
-  );
-}
-
-// Custom control bar
-function CallControls({
-  onLeave,
-}: {
-  onLeave: () => void;
-}) {
-  const { localParticipant } = useLocalParticipant();
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(false);
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
-
-  const toggleMute = useCallback(async () => {
-    if (localParticipant) {
-      await localParticipant.setMicrophoneEnabled(isMuted);
-      setIsMuted(!isMuted);
-    }
-  }, [localParticipant, isMuted]);
-
-  const toggleVideo = useCallback(async () => {
-    if (localParticipant) {
-      await localParticipant.setCameraEnabled(isVideoOff);
-      setIsVideoOff(!isVideoOff);
-    }
-  }, [localParticipant, isVideoOff]);
-
-  const toggleScreenShare = useCallback(async () => {
-    if (localParticipant) {
-      await localParticipant.setScreenShareEnabled(!isScreenSharing);
-      setIsScreenSharing(!isScreenSharing);
-    }
-  }, [localParticipant, isScreenSharing]);
-
-  return (
-    <div className="absolute bottom-0 left-0 right-0 p-6">
-      <div className="flex items-center justify-center gap-4">
-        {/* Mute */}
-        <button
-          onClick={toggleMute}
-          className={`call-control ${isMuted ? 'call-control-active' : 'call-control-default'}`}
-          title={isMuted ? 'Unmute' : 'Mute'}
-        >
-          {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-        </button>
-
-        {/* Video */}
-        <button
-          onClick={toggleVideo}
-          className={`call-control ${isVideoOff ? 'call-control-active' : 'call-control-default'}`}
-          title={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
-        >
-          {isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
-        </button>
-
-        {/* Screen share */}
-        <button
-          onClick={toggleScreenShare}
-          className={`call-control ${isScreenSharing ? 'call-control-active' : 'call-control-default'}`}
-          title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
-        >
-          {isScreenSharing ? (
-            <ScreenShareOff className="w-6 h-6" />
-          ) : (
-            <ScreenShare className="w-6 h-6" />
-          )}
-        </button>
-
-        {/* End call */}
-        <button
-          onClick={onLeave}
-          className="call-control call-control-danger"
-          title="Leave call"
-        >
-          <PhoneOff className="w-6 h-6" />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// Main call page
+/**
+ * A call is a MEET room. NEON keeps the frame around it — who's in, how long
+ * it's been running, and the button that hangs up — while MEET owns the media
+ * and its own mic/camera/share controls inside the iframe.
+ */
 export default function CallPage() {
   const { callId } = useParams();
   const navigate = useNavigate();
-  const [room, setRoom] = useState<Room | null>(null);
+  const meetRef = useRef<MeetEmbedHandle>(null);
 
-  // Fetch call token
+  const [participantCount, setParticipantCount] = useState(0);
+  const [reconnecting, setReconnecting] = useState(false);
+  // Guards the close path: MEET can report a departure while NEON is already
+  // tearing down, and ending a call twice is a wasted round trip at best.
+  const closing = useRef(false);
+
   const { data: callData, isLoading, error } = useQuery({
     queryKey: ['call', callId],
     queryFn: async () => {
@@ -161,32 +31,47 @@ export default function CallPage() {
     },
     enabled: !!callId,
     retry: false,
+    // The join response carries a room code, not a short-lived token, so it
+    // does not need refetching while the call is up.
+    staleTime: Infinity,
   });
 
-  // Handle leaving the call
-  const handleLeave = useCallback(async () => {
-    if (room) {
-      room.disconnect();
-    }
-    if (callId) {
-      try {
-        await callsApi.end(callId);
-      } catch {
-        // Ignore errors when leaving
+  const closeCall = useCallback(
+    async (endForEveryone: boolean) => {
+      if (closing.current) return;
+      closing.current = true;
+
+      if (endForEveryone && callId) {
+        try {
+          await callsApi.end(callId);
+        } catch {
+          // The call is over for this participant either way.
+        }
       }
-    }
-    navigate(-1);
-  }, [room, callId, navigate]);
-
-  // Handle room connection
-  const handleRoomConnected = useCallback((connectedRoom: Room) => {
-    setRoom(connectedRoom);
-
-    connectedRoom.on(RoomEvent.Disconnected, () => {
-      toast('Call ended');
       navigate(-1);
-    });
-  }, [navigate]);
+    },
+    [callId, navigate]
+  );
+
+  // NEON's hang-up button: ask MEET to leave, and let the bridge's `meet:left`
+  // drive the teardown, so the two paths can't disagree about what happened.
+  const handleLeaveClick = useCallback(() => {
+    meetRef.current?.leave();
+  }, []);
+
+  const handleLeft = useCallback(
+    ({ reason }: { room: string; reason: MeetLeaveReason }) => {
+      if (reason === 'ended') toast('Call ended');
+      if (reason === 'removed') toast('You were removed from the call');
+      if (reason === 'connection-lost') toast.error('Lost connection to the call');
+      if (reason === 'duplicate') toast('You joined this call from another window');
+
+      // 'duplicate' means this window lost the room to another one of yours —
+      // the call itself is still going, so don't end it for everyone.
+      void closeCall(reason !== 'duplicate');
+    },
+    [closeCall]
+  );
 
   if (isLoading) {
     return (
@@ -199,9 +84,9 @@ export default function CallPage() {
     );
   }
 
-  if (error || !callData) {
+  if (error || !callData?.meet) {
     return (
-      <div className="min-h-screen bg-neon-bg flex items-center justify-center">
+      <div className="min-h-screen bg-neon-bg flex items-center justify-center p-4">
         <div className="text-center">
           <p className="text-neon-error mb-4">
             {error ? getErrorMessage(error) : 'Failed to join call'}
@@ -215,19 +100,45 @@ export default function CallPage() {
   }
 
   return (
-    <div className="h-full bg-neon-bg relative">
-      <LiveKitRoom
-        serverUrl={import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880'}
-        token={callData.token}
-        connectOptions={{ autoSubscribe: true }}
-        onConnected={() => handleRoomConnected}
-        onDisconnected={() => navigate(-1)}
-        className="h-full"
-      >
-        <VideoGrid />
-        <RoomAudioRenderer />
-        <CallControls onLeave={handleLeave} />
-      </LiveKitRoom>
+    <div className="h-full bg-neon-bg flex flex-col">
+      <div className="h-14 shrink-0 bg-neon-surface border-b border-neon-border px-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <Users className="w-4 h-4 text-neon-text-muted shrink-0" />
+          <span className="text-sm text-neon-text-secondary truncate">
+            {participantCount === 1
+              ? 'Waiting for others to join'
+              : `${participantCount} in this call`}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {reconnecting && (
+            <span className="text-xs text-neon-text-muted hidden sm:inline">Reconnecting…</span>
+          )}
+          <button
+            onClick={handleLeaveClick}
+            className="call-control call-control-danger min-w-[44px] min-h-[44px]"
+            title="Leave call"
+            aria-label="Leave call"
+          >
+            <PhoneOff className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-hidden">
+        <MeetEmbed
+          ref={meetRef}
+          url={callData.meet.url}
+          origin={callData.meet.origin}
+          title="Call"
+          onJoined={() => setReconnecting(false)}
+          onReconnecting={() => setReconnecting(true)}
+          onParticipants={({ count }) => setParticipantCount(count)}
+          onLeft={handleLeft}
+          onError={({ message }) => toast.error(message)}
+        />
+      </div>
     </div>
   );
 }
