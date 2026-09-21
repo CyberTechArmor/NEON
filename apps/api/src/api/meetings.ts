@@ -8,7 +8,13 @@ import { createMeetingSchema, updateMeetingSchema, paginationSchema } from '@neo
 import { NotFoundError, ForbiddenError } from '@neon/shared';
 import { authenticate } from '../middleware/auth';
 import { AuditService } from '../services/audit';
-import { generateRoomCode, buildMeetSession, endMeeting } from '../services/meet';
+import {
+  generateRoomCode,
+  buildMeetSession,
+  endMeeting,
+  getMeetIntegration,
+  requireMeetIntegration,
+} from '../services/meet';
 
 const router = Router();
 router.use(authenticate);
@@ -180,18 +186,21 @@ router.post('/:id/join', async (req: Request, res: Response, next: NextFunction)
       throw new NotFoundError('Meeting', req.params.id);
     }
 
+    // The organisation's MEET (Admin → Integrations). No MEET, no meeting.
+    const meetIntegration = await requireMeetIntegration(req.orgId!);
+
     // `livekitRoom` is the historical column name; it now holds a MEET room
     // code, minted on the first join and reused by everyone after.
     let livekitRoom = meeting.livekitRoom;
     if (!livekitRoom) {
-      livekitRoom = await generateRoomCode();
+      livekitRoom = await generateRoomCode(meetIntegration);
       await prisma.meeting.update({
         where: { id: meeting.id },
         data: { livekitRoom },
       });
     }
 
-    const meet = buildMeetSession(livekitRoom, { name: req.user!.displayName });
+    const meet = buildMeetSession(meetIntegration, livekitRoom, { name: req.user!.displayName });
 
     // Update participant join time
     await prisma.meetingParticipant.updateMany({
@@ -266,9 +275,13 @@ router.post('/:id/end', async (req: Request, res: Response, next: NextFunction) 
     });
 
     // Disconnect anyone still in the MEET room. Best-effort: NEON's record is
-    // what decides the meeting is over.
+    // what decides the meeting is over, and a removed integration is not an
+    // error here.
     if (meeting.livekitRoom) {
-      await endMeeting(meeting.livekitRoom, `neon-${req.userId!}`);
+      const meetIntegration = await getMeetIntegration(req.orgId!);
+      if (meetIntegration) {
+        await endMeeting(meetIntegration, meeting.livekitRoom, `neon-${req.userId!}`);
+      }
     }
 
     res.json({

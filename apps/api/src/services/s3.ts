@@ -2,11 +2,15 @@
  * S3 Service
  *
  * S3-compatible storage operations (Garage, MinIO, AWS S3)
- * Supports both environment-based config and per-org database config
+ * Supports both environment-based config and per-org database config.
+ *
+ * Every client comes from createS3Client (./s3-client.ts) — never `new
+ * S3Client` here — so the checksum opt-out that non-AWS stores need is
+ * applied uniformly. See that file for the BadDigest story.
  */
 
 import {
-  S3Client,
+  type S3Client,
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
@@ -16,6 +20,7 @@ import {
   CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl as awsGetSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { createS3Client } from './s3-client';
 import { getConfig } from '@neon/config';
 import { prisma } from '@neon/database';
 
@@ -99,24 +104,20 @@ export async function getOrgS3Client(orgId: string): Promise<{ client: S3Client;
   const orgConfig = await getOrgS3Config(orgId);
 
   if (orgConfig) {
-    const client = new S3Client({
+    const client = createS3Client({
       endpoint: orgConfig.endpoint,
       region: orgConfig.region,
-      credentials: {
-        accessKeyId: orgConfig.accessKeyId,
-        secretAccessKey: orgConfig.secretAccessKey,
-      },
+      accessKeyId: orgConfig.accessKeyId,
+      secretAccessKey: orgConfig.secretAccessKey,
       forcePathStyle: orgConfig.forcePathStyle,
     });
 
     const publicEndpoint = orgConfig.publicEndpoint || orgConfig.endpoint;
-    const publicClient = new S3Client({
+    const publicClient = createS3Client({
       endpoint: publicEndpoint,
       region: orgConfig.region,
-      credentials: {
-        accessKeyId: orgConfig.accessKeyId,
-        secretAccessKey: orgConfig.secretAccessKey,
-      },
+      accessKeyId: orgConfig.accessKeyId,
+      secretAccessKey: orgConfig.secretAccessKey,
       forcePathStyle: orgConfig.forcePathStyle,
     });
 
@@ -147,13 +148,11 @@ export function clearAllOrgS3Cache(): void {
  */
 function getClient(): S3Client {
   if (!s3Client) {
-    s3Client = new S3Client({
+    s3Client = createS3Client({
       endpoint: config.s3.endpoint,
       region: config.s3.region,
-      credentials: {
-        accessKeyId: config.s3.accessKey,
-        secretAccessKey: config.s3.secretKey,
-      },
+      accessKeyId: config.s3.accessKey,
+      secretAccessKey: config.s3.secretKey,
       forcePathStyle: config.s3.forcePathStyle,
     });
   }
@@ -167,13 +166,11 @@ function getClient(): S3Client {
 function getPublicClient(): S3Client {
   if (!s3PublicClient) {
     const publicEndpoint = config.s3.publicEndpoint || config.s3.endpoint;
-    s3PublicClient = new S3Client({
+    s3PublicClient = createS3Client({
       endpoint: publicEndpoint,
       region: config.s3.region,
-      credentials: {
-        accessKeyId: config.s3.accessKey,
-        secretAccessKey: config.s3.secretKey,
-      },
+      accessKeyId: config.s3.accessKey,
+      secretAccessKey: config.s3.secretKey,
       forcePathStyle: config.s3.forcePathStyle,
     });
   }
@@ -380,13 +377,11 @@ export async function testConnection(testConfig: S3Config): Promise<{
   const startTime = Date.now();
 
   try {
-    const testClient = new S3Client({
+    const testClient = createS3Client({
       endpoint: testConfig.endpoint,
       region: testConfig.region,
-      credentials: {
-        accessKeyId: testConfig.accessKeyId,
-        secretAccessKey: testConfig.secretAccessKey,
-      },
+      accessKeyId: testConfig.accessKeyId,
+      secretAccessKey: testConfig.secretAccessKey,
       forcePathStyle: testConfig.forcePathStyle,
     });
 

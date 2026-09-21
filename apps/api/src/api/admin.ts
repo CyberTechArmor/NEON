@@ -21,7 +21,7 @@ import {
   getAvailableFeatureKeys,
 } from '../services/featureFlags';
 import { broadcastToOrg } from '../socket';
-import { checkMeetHealth } from '../services/meet';
+import { checkMeetHealth, buildJoinUrl } from '../services/meet';
 
 const config = getConfig();
 
@@ -112,7 +112,7 @@ router.get('/health', requirePermission('org:view_settings'), async (req: Reques
       checkDatabaseHealth(),
       checkRedisHealth(),
       checkStorageHealth(req.orgId!),
-      checkMeetHealth(),
+      checkMeetHealth(req.orgId!),
     ]);
 
     const allHealthy = dbHealth.healthy && redisHealth.healthy && storageHealth.healthy && meetHealth.healthy;
@@ -3373,17 +3373,13 @@ router.get('/integrations/meet/join-url', async (req: Request, res: Response, ne
       });
     }
 
-    // Build the join URL
-    const params = new URLSearchParams();
-    params.set('room', roomName as string);
-    if (displayName) params.set('name', displayName as string);
-    if (integration.autoJoin && displayName) params.set('autojoin', 'true');
-    const effectiveQuality = (quality as string) || integration.defaultQuality;
-    if (effectiveQuality && effectiveQuality !== 'auto') {
-      params.set('quality', effectiveQuality);
-    }
-
-    const joinUrl = `${integration.baseUrl}/?${params.toString()}`;
+    // One URL builder for every MEET embed (embed=1, hideEndCall=1, autojoin
+    // and quality from the integration). `displayName` is the CALLER's own
+    // name, pre-filled for them only — this URL is not an invite link.
+    const joinUrl = buildJoinUrl(integration, roomName as string, {
+      name: displayName as string | undefined,
+      quality: quality as string | undefined,
+    });
 
     return res.json({
       success: true,
@@ -3433,13 +3429,10 @@ router.post('/integrations/meet/create-room', async (req: Request, res: Response
       });
     }
 
-    // Build join URL helper
-    const buildJoinUrl = (room: string) => {
-      const params = new URLSearchParams();
-      params.set('room', room);
-      if (integration.autoJoin) params.set('autojoin', 'true');
-      return `${integration.baseUrl}/?${params.toString()}`;
-    };
+    // The join URL this returns is shareable (the client hands it to every
+    // participant), so it carries the room and the embed flags only — never
+    // a name. Each viewer's name is added at embed time, per viewer.
+    const joinUrlFor = (room: string) => buildJoinUrl(integration, room);
 
     // First, try to get the existing room
     try {
@@ -3458,7 +3451,7 @@ router.post('/integrations/meet/create-room', async (req: Request, res: Response
           success: true,
           data: {
             room: existingRoom.room || existingRoom,
-            joinUrl: buildJoinUrl(roomName),
+            joinUrl: joinUrlFor(roomName),
             existed: true,
           },
           meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -3491,7 +3484,7 @@ router.post('/integrations/meet/create-room', async (req: Request, res: Response
           success: true,
           data: {
             room: { name: roomName, displayName: displayName || roomName },
-            joinUrl: buildJoinUrl(roomName),
+            joinUrl: joinUrlFor(roomName),
             existed: true,
           },
           meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
@@ -3511,7 +3504,7 @@ router.post('/integrations/meet/create-room', async (req: Request, res: Response
       success: true,
       data: {
         room: roomData.room,
-        joinUrl: buildJoinUrl(roomName),
+        joinUrl: joinUrlFor(roomName),
         existed: false,
       },
       meta: { requestId: req.requestId, timestamp: new Date().toISOString() },
