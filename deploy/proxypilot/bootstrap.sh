@@ -14,6 +14,10 @@
 # `git fetch` + `reset --hard` leaves untracked files alone, so the credentials
 # in deploy/proxypilot/env/*.env survive every update.
 #
+# BRANCH tracks mainline. Point it at a feature branch to stage something on
+# this guest, but move it back once that branch merges — a deployment pinned to
+# a merged branch stops seeing mainline changes without ever failing.
+#
 # It returns as soon as the work is under way. A full deploy takes minutes —
 # longer than a ProxyPilot tool call or a boot job wants to block for — so the
 # real work runs as its own transient unit and is followed afterwards:
@@ -27,7 +31,7 @@
 set -euo pipefail
 
 REPO=https://github.com/CyberTechArmor/NEON.git
-BRANCH=claude/neon-deploy-fractionate-proxypilot-x0bzcs
+BRANCH=main
 SRC=/opt/neon
 DEPLOY="$SRC/deploy/proxypilot"
 
