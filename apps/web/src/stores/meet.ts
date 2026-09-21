@@ -55,11 +55,28 @@ export interface IncomingCall {
 }
 
 /**
- * How every call announcement starts. The socket handler rings on this
- * prefix even when the message carries no call metadata, so a caller on an
- * older client still rings everyone.
+ * How every call announcement starts, by kind. The socket handler rings on
+ * these prefixes even when the message carries no call metadata, so a caller
+ * on an older client still rings everyone. Phone and camera buttons both
+ * announce this way; only the wording differs.
  */
-export const CALL_ANNOUNCEMENT_PREFIX = '📹 Started a video call';
+export const CALL_ANNOUNCEMENT_PREFIXES: Record<'video' | 'voice', string> = {
+  video: '📹 Started a video call',
+  voice: '📞 Started a voice call',
+};
+
+/** The kind a message announces, or null when it is not a call announcement. */
+export function announcedCallKind(message: {
+  content?: string | null;
+  metadata?: { call?: { room?: string; kind?: string } } | null;
+}): 'video' | 'voice' | null {
+  const metadataKind = message.metadata?.call?.kind;
+  if (message.metadata?.call?.room) return metadataKind === 'voice' ? 'voice' : 'video';
+  const content = message.content ?? '';
+  if (content.startsWith(CALL_ANNOUNCEMENT_PREFIXES.voice)) return 'voice';
+  if (content.startsWith(CALL_ANNOUNCEMENT_PREFIXES.video)) return 'video';
+  return null;
+}
 
 /** How long a call keeps ringing before the popup gives up on its own. */
 export const INCOMING_CALL_TIMEOUT_MS = 60 * 1000;
@@ -103,7 +120,12 @@ interface MeetState {
     conversationId: string;
     participants: MeetParticipant[];
     displayName: string;
+    /** Phone button = voice, camera button = video. Same room, same ring; only the wording differs. */
+    kind?: 'video' | 'voice';
   }) => Promise<void>;
+
+  /** Join a call someone announced in a conversation (the Join button on the announcement). */
+  joinAnnouncedCall: (options: { conversationId: string; room: string; callerName: string }) => Promise<void>;
 
   joinCall: (options: {
     roomName: string;
@@ -206,7 +228,7 @@ export const useMeetStore = create<MeetState>()(
         });
       },
 
-      startCall: async ({ conversationId, participants, displayName }) => {
+      startCall: async ({ conversationId, participants, displayName, kind = 'video' }) => {
         const state = get();
 
         // Ensure config is loaded
@@ -273,8 +295,8 @@ export const useMeetStore = create<MeetState>()(
           // posts.
           try {
             await messagesApi.send(conversationId, {
-              content: `${CALL_ANNOUNCEMENT_PREFIX} — answer the ring, or press the camera button in this conversation to join.`,
-              metadata: { call: { room: roomName, kind: 'video' } },
+              content: `${CALL_ANNOUNCEMENT_PREFIXES[kind]} — answer the ring, or press Join on this message.`,
+              metadata: { call: { room: roomName, kind } },
             });
           } catch (notifyError) {
             console.warn('[MeetStore] Could not post the call-started message:', notifyError);
@@ -342,6 +364,20 @@ export const useMeetStore = create<MeetState>()(
             joinError: error.response?.data?.error?.message || error.message || 'Failed to join call',
           });
         }
+      },
+
+      joinAnnouncedCall: async ({ conversationId, room, callerName }) => {
+        if (get().activeCall) return;
+        if (get().incomingCall?.conversationId === conversationId) set({ incomingCall: null });
+        const me = useAuthStore.getState().user;
+        await get().joinCall({
+          roomName: room,
+          displayName: me?.name || 'Guest',
+          conversationId,
+          title: callerName,
+        });
+        const error = get().joinError;
+        if (error) throw new Error(error);
       },
 
       setIncomingCall: (call) => {
