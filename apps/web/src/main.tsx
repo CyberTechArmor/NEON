@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import App from './App';
 import { MeetProvider } from './components/meet';
+import { startPwaUpdates } from './lib/pwaUpdate';
 import './styles/globals.css';
 
 // Don't render React app for /api routes - let the server handle them
@@ -53,13 +54,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   </React.StrictMode>
 );
 
-// Register service worker for PWA
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((error) => {
-      console.log('Service worker registration failed:', error);
-    });
-  });
-}
+// Register the service worker and keep this tab on the current build
+// (see lib/pwaUpdate.ts — a redeploy no longer needs a hard refresh).
+startPwaUpdates();
 
 } // End of else block for non-/api routes

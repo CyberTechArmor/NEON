@@ -43,7 +43,7 @@ export function IncomingCallToast() {
     <div
       role="alertdialog"
       aria-live="assertive"
-      aria-label={`Incoming ${isVideo ? 'video ' : ''}call from ${incomingCall.callerName}`}
+      aria-label={`${incomingCall.callerName} is calling`}
       className="fixed top-4 right-4 left-4 sm:left-auto sm:w-[360px] z-[110] rounded-xl border border-neon-success/50 bg-neon-surface shadow-2xl p-4"
     >
       <div className="flex items-center gap-3">
@@ -59,12 +59,9 @@ export function IncomingCallToast() {
           </div>
         </div>
 
-        <div className="flex-1 min-w-0">
-          <p className="font-medium truncate">{incomingCall.callerName}</p>
-          <p className="text-sm text-neon-success flex items-center gap-1.5">
-            <Icon className="w-4 h-4 animate-pulse" />
-            Incoming {isVideo ? 'video call' : 'call'}…
-          </p>
+        <div className="flex-1 min-w-0 flex items-center gap-2">
+          <Icon className="w-5 h-5 text-neon-success animate-pulse flex-shrink-0" />
+          <p className="font-medium truncate">{incomingCall.callerName} is calling</p>
         </div>
       </div>
 

@@ -54,6 +54,13 @@ export interface IncomingCall {
   receivedAt: number;
 }
 
+/**
+ * How every call announcement starts. The socket handler rings on this
+ * prefix even when the message carries no call metadata, so a caller on an
+ * older client still rings everyone.
+ */
+export const CALL_ANNOUNCEMENT_PREFIX = '📹 Started a video call';
+
 /** How long a call keeps ringing before the popup gives up on its own. */
 export const INCOMING_CALL_TIMEOUT_MS = 60 * 1000;
 
@@ -266,7 +273,7 @@ export const useMeetStore = create<MeetState>()(
           // posts.
           try {
             await messagesApi.send(conversationId, {
-              content: '📹 Started a video call — answer the ring, or press the camera button in this conversation to join.',
+              content: `${CALL_ANNOUNCEMENT_PREFIX} — answer the ring, or press the camera button in this conversation to join.`,
               metadata: { call: { room: roomName, kind: 'video' } },
             });
           } catch (notifyError) {
